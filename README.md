@@ -136,6 +136,16 @@ Push to main
 
 The workflow also supports **manual trigger** via `workflow_dispatch` from the Actions tab.
 
+### Local Validation (Safe, No Deployment)
+
+You can validate Terraform syntax locally before pushing to GitHub. This **will not deploy or modify** any resources:
+
+```bash
+cd infra
+terraform init -backend=false
+terraform validate
+```
+
 ### Manual Deployment
 
 If you need to deploy manually:

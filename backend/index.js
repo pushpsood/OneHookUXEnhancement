@@ -25,9 +25,9 @@ const redis = new Redis({
 // OpenAI Setup
 const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const apiVersion = "2024-02-15-preview"; // adjust as needed
-const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-4";
+const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-4o";
 if (!process.env.AZURE_OPENAI_DEPLOYMENT) {
-  console.warn('[WARN] AZURE_OPENAI_DEPLOYMENT not set, defaulting to "gpt-4"');
+  console.warn('[WARN] AZURE_OPENAI_DEPLOYMENT not set, defaulting to "gpt-4o"');
 }
 
 const scope = "https://cognitiveservices.azure.com/.default";

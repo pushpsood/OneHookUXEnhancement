@@ -14,4 +14,3 @@ node_modules/
 *.tfstate.backup
 *.tfplan
 terraform.tfvars
-.terraform.lock.hcl
