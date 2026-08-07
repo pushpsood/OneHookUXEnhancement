@@ -1,7 +1,7 @@
 variable "location" {
   description = "The Azure Region in which all resources in this example should be created."
   type        = string
-  default     = "westindia"
+  default     = "australiaeast"
 }
 
 variable "resource_group_name" {
@@ -28,6 +28,24 @@ variable "openai_name" {
   default     = "onehook-openai-svc"
 }
 
+variable "openai_deployment_name" {
+  description = "The name of the Azure OpenAI model deployment"
+  type        = string
+  default     = "gpt-4"
+}
+
+variable "openai_model_name" {
+  description = "The Azure OpenAI model to deploy (e.g. gpt-4, gpt-4o, gpt-4o-mini)"
+  type        = string
+  default     = "gpt-4"
+}
+
+variable "openai_model_version" {
+  description = "The version of the model to deploy. Check availability in your region at https://learn.microsoft.com/azure/ai-services/openai/concepts/models"
+  type        = string
+  default     = "0613"
+}
+
 variable "redis_name" {
   description = "The name of the Redis Cache"
   type        = string
@@ -44,10 +62,4 @@ variable "storage_container_name" {
   description = "The name of the Blob Storage Container for context"
   type        = string
   default     = "codecontext"
-}
-
-variable "openai_deployment_name" {
-  description = "The name of the Azure OpenAI model deployment"
-  type        = string
-  default     = "gpt-4"
 }

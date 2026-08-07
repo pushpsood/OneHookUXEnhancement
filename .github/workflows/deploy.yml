@@ -82,7 +82,7 @@ jobs:
 
       - name: Install Dependencies
         working-directory: ./backend
-        run: npm ci --production
+        run: npm ci --omit=dev
 
       - name: Azure Login
         uses: azure/login@v2

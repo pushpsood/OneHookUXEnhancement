@@ -1,7 +1,13 @@
 terraform {
+  required_version = ">= 1.5"
+
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
+      version = "~> 3.0"
+    }
+    random = {
+      source  = "hashicorp/random"
       version = "~> 3.0"
     }
   }
@@ -34,7 +40,7 @@ resource "azurerm_storage_account" "storage" {
 
 resource "azurerm_storage_container" "context_container" {
   name                  = var.storage_container_name
-  storage_account_name  = azurerm_storage_account.storage.name
+  storage_account_id    = azurerm_storage_account.storage.id
   container_access_type = "private"
 }
 
@@ -61,25 +67,25 @@ resource "azurerm_cognitive_deployment" "gpt" {
 
   model {
     format  = "OpenAI"
-    name    = "gpt-4"
-    version = "turbo-2024-04-09"
+    name    = var.openai_model_name
+    version = var.openai_model_version
   }
 
-  sku {
-    name     = "Standard"
+  scale {
+    type     = "Standard"
     capacity = 10
   }
 }
 
 # Redis Cache for Rate Limiting
 resource "azurerm_redis_cache" "redis" {
-  name                = var.redis_name
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
-  capacity            = 0
-  family              = "C"
-  sku_name            = "Basic"
-  enable_non_ssl_port = false
+  name                 = var.redis_name
+  location             = azurerm_resource_group.rg.location
+  resource_group_name  = azurerm_resource_group.rg.name
+  capacity             = 0
+  family               = "C"
+  sku_name             = "Basic"
+  non_ssl_port_enabled = false
 }
 
 # App Service Plan (Linux)
