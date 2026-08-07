@@ -14,3 +14,4 @@ node_modules/
 *.tfstate.backup
 *.tfplan
 terraform.tfvars
+dist/

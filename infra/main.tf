@@ -11,6 +11,14 @@ terraform {
       version = "~> 3.0"
     }
   }
+  
+  backend "azurerm" {
+    resource_group_name  = "onehook-tfstate-rg"
+    storage_account_name = "onehooktfstate4x"
+    container_name       = "tfstate"
+    key                  = "terraform.tfstate"
+    use_oidc             = true
+  }
 }
 
 provider "azurerm" {
