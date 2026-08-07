@@ -43,7 +43,7 @@ variable "openai_model_name" {
 variable "openai_model_version" {
   description = "The version of the model to deploy. Check availability in your region at https://learn.microsoft.com/azure/ai-services/openai/concepts/models"
   type        = string
-  default     = "2024-08-06"
+  default     = "2024-11-20"
 }
 
 
