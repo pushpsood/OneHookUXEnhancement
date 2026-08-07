@@ -1,13 +1,15 @@
 {
-  "name": "backend",
+  "name": "onehook-ux-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "OneHook UX Enhancement Backend — AI chatbot API powered by Azure OpenAI",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
+  "author": "pushpsood",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {

@@ -45,3 +45,9 @@ variable "storage_container_name" {
   type        = string
   default     = "codecontext"
 }
+
+variable "openai_deployment_name" {
+  description = "The name of the Azure OpenAI model deployment"
+  type        = string
+  default     = "gpt-4"
+}

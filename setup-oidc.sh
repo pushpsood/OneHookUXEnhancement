@@ -3,7 +3,7 @@ set -e
 
 # Configuration - Update these if your repository name or branch differs
 APP_NAME="OneHookGitHubActions"
-REPO="pushpsood/onehook.club"
+REPO="pushpsood/OneHookUxEnhancement"
 BRANCH="main"
 
 echo "========================================="

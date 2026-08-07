@@ -89,11 +89,14 @@ resource "azurerm_linux_web_app" "app" {
     application_stack {
       node_version = "20-lts"
     }
+    health_check_path = "/health"
   }
 
   app_settings = {
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
+    "SCM_DO_BUILD_DURING_DEPLOYMENT"      = "true"
     "AZURE_OPENAI_ENDPOINT"               = azurerm_cognitive_account.openai.endpoint
+    "AZURE_OPENAI_DEPLOYMENT"             = var.openai_deployment_name
     "REDIS_HOST"                          = azurerm_redis_cache.redis.hostname
     "REDIS_PASSWORD"                      = azurerm_redis_cache.redis.primary_access_key
     "AZURE_STORAGE_ACCOUNT"               = azurerm_storage_account.storage.name

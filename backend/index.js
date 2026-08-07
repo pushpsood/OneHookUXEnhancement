@@ -26,6 +26,9 @@ const redis = new Redis({
 const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const apiVersion = "2024-02-15-preview"; // adjust as needed
 const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-4";
+if (!process.env.AZURE_OPENAI_DEPLOYMENT) {
+  console.warn('[WARN] AZURE_OPENAI_DEPLOYMENT not set, defaulting to "gpt-4"');
+}
 
 const scope = "https://cognitiveservices.azure.com/.default";
 const azureADTokenProvider = getBearerTokenProvider(credential, scope);
@@ -112,6 +115,11 @@ const fetchGitHubContext = async (query) => {
   }
   return context;
 };
+
+// Health check endpoint for Azure App Service probes
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 app.post('/api/chat', rateLimiter, botDetector, async (req, res) => {
   try {
