@@ -1,0 +1,47 @@
+variable "location" {
+  description = "The Azure Region in which all resources in this example should be created."
+  type        = string
+  default     = "westindia"
+}
+
+variable "resource_group_name" {
+  description = "The name of the resource group"
+  type        = string
+  default     = "onehook-chatbot-rg"
+}
+
+variable "app_service_plan_name" {
+  description = "The name of the app service plan"
+  type        = string
+  default     = "onehook-chatbot-asp"
+}
+
+variable "app_service_name" {
+  description = "The name of the app service"
+  type        = string
+  default     = "onehook-chatbot-api"
+}
+
+variable "openai_name" {
+  description = "The name of the Azure OpenAI service"
+  type        = string
+  default     = "onehook-openai-svc"
+}
+
+variable "redis_name" {
+  description = "The name of the Redis Cache"
+  type        = string
+  default     = "onehook-redis-cache"
+}
+
+variable "storage_account_name" {
+  description = "The name of the Storage Account"
+  type        = string
+  default     = "onehookstorage"
+}
+
+variable "storage_container_name" {
+  description = "The name of the Blob Storage Container for context"
+  type        = string
+  default     = "codecontext"
+}
