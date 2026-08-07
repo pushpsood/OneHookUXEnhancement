@@ -54,6 +54,23 @@ resource "azurerm_cognitive_account" "openai" {
   sku_name            = "S0"
 }
 
+# Azure OpenAI Model Deployment
+resource "azurerm_cognitive_deployment" "gpt" {
+  name                 = var.openai_deployment_name
+  cognitive_account_id = azurerm_cognitive_account.openai.id
+
+  model {
+    format  = "OpenAI"
+    name    = "gpt-4"
+    version = "turbo-2024-04-09"
+  }
+
+  sku {
+    name     = "Standard"
+    capacity = 10
+  }
+}
+
 # Redis Cache for Rate Limiting
 resource "azurerm_redis_cache" "redis" {
   name                = var.redis_name

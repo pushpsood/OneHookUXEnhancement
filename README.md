@@ -1,6 +1,6 @@
 # OneHook UX Enhancement — Backend & Infrastructure
 
-AI-driven chatbot API powered by **Azure OpenAI**, deployed to **Azure App Service** via **Terraform** and **GitHub Actions**.
+AI-driven chatbot API powered by **Azure OpenAI (GPT-4 Turbo)**, deployed to **Azure App Service** via **Terraform** and **GitHub Actions** with secretless **OIDC** authentication.
 
 ---
 
@@ -16,10 +16,23 @@ Azure App Service (Node.js 20)
             │
             ├── Azure Redis Cache   → Rate limiting (10 req/60s per IP)
             ├── Azure Blob Storage  → Code context (Managed Identity)
-            └── Azure OpenAI        → Chat completions (Managed Identity)
+            └── Azure OpenAI        → GPT-4 Turbo completions (Managed Identity)
 ```
 
 All Azure service communication uses **System-Assigned Managed Identity** — no secrets stored in the app.
+
+### What Terraform Provisions
+
+| Resource | Purpose |
+|---|---|
+| Resource Group | Container for all resources |
+| App Service Plan (B1 Linux) | Hosts the Node.js backend |
+| App Service | The chatbot API |
+| Azure OpenAI (Cognitive Services) | AI service |
+| GPT-4 Turbo Model Deployment | The actual model the backend calls |
+| Redis Cache (Basic C0) | Rate limiting |
+| Storage Account + Blob Container | Code context for the chatbot |
+| RBAC Role Assignments | Managed Identity access to OpenAI, Storage |
 
 ---
 
@@ -34,7 +47,7 @@ All Azure service communication uses **System-Assigned Managed Identity** — no
 ### Setup
 
 ```bash
-cd OneHookUxEnhancement/backend
+cd backend
 
 # Install dependencies
 npm install
@@ -56,6 +69,8 @@ npm run dev
 | `AZURE_STORAGE_ACCOUNT` | Storage account name | — | ✅ |
 | `AZURE_STORAGE_CONTAINER` | Blob container name | `codecontext` | — |
 | `PORT` | Server port | `8080` | — |
+
+In production, all variables are injected by Terraform via App Service `app_settings` — no manual config needed.
 
 ---
 
@@ -80,20 +95,22 @@ We use **Azure OIDC** so GitHub Actions can deploy to Azure **without storing an
 
 #### Run the setup script (once)
 ```bash
-cd OneHookUxEnhancement
 chmod +x setup-oidc.sh
 ./setup-oidc.sh
 ```
 
 This script:
+- Fetches your **GitHub owner and repo numeric IDs** (required by GitHub's OIDC subject claim format)
 - Creates an **Azure AD Application** (Service Principal)
 - Grants **Contributor** + **User Access Administrator** roles on your subscription
-- Creates a **Federated Identity Credential** trusting `pushpsood/OneHookUxEnhancement` on `main`
+- Creates a **Federated Identity Credential** with the correct subject claim: `repo:pushpsood@<owner_id>/OneHookUxEnhancement@<repo_id>:ref:refs/heads/main`
 - Saves `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` to GitHub Secrets
+
+> **Note:** If the OIDC subject claim format changes in the future, you can update just the credential without re-creating the entire app. See [Troubleshooting](#troubleshooting).
 
 ### CI/CD Pipeline
 
-Every push to `main` that touches `OneHookUxEnhancement/` triggers the pipeline:
+Every push to `main` that touches `backend/` or `infra/` triggers the pipeline:
 
 ```
 Push to main
@@ -117,7 +134,7 @@ Push to main
 └─────────────────────┘
 ```
 
-The workflow file lives at `.github/workflows/deploy.yml` in this repository.
+The workflow also supports **manual trigger** via `workflow_dispatch` from the Actions tab.
 
 ### Manual Deployment
 
@@ -128,7 +145,7 @@ If you need to deploy manually:
 az login
 
 # 2. Apply Terraform
-cd OneHookUxEnhancement/infra
+cd infra
 terraform init
 terraform plan
 terraform apply
@@ -144,9 +161,22 @@ az webapp deploy \
 
 ---
 
-## Rollback
+## Cross-Repo Dependency: OneHookClient Context
 
-To roll back to a previous version:
+The **OneHookClient** repo has a `push-context.yml` workflow that uploads its source code to this project's Azure Blob Storage container (`codecontext`). The chatbot uses this context to answer questions about the platform.
+
+**Deploy order matters:** This repo's Terraform must run first to create the storage account before OneHookClient's push-context workflow can upload to it.
+
+The contract between the repos:
+| Value | Defined in Terraform (`variables.tf`) | Used by OneHookClient (`push-context.yml`) |
+|---|---|---|
+| Resource Group | `onehook-chatbot-rg` | Hardcoded |
+| Container Name | `codecontext` | Hardcoded |
+| Storage Account | Dynamic (random suffix) | Discovered via `az storage account list` |
+
+---
+
+## Rollback
 
 ```bash
 # Option 1: Redeploy a previous commit via GitHub Actions
@@ -154,7 +184,7 @@ To roll back to a previous version:
 
 # Option 2: Redeploy from CLI
 git checkout <previous-commit-sha>
-cd OneHookUxEnhancement/backend
+cd backend
 az webapp deploy \
   --resource-group onehook-chatbot-rg \
   --name onehook-chatbot-api \
@@ -199,6 +229,29 @@ For production monitoring, add Azure Application Insights to the Terraform confi
 
 ---
 
+## Troubleshooting
+
+### OIDC Login Fails (`AADSTS700213: No matching federated identity record`)
+
+GitHub's OIDC subject claim includes numeric owner/repo IDs. If the format changes or credentials were created with an old format, update just the credential:
+
+```bash
+APP_ID=$(az ad app list --display-name OneHookGitHubActions --query '[0].appId' -o tsv)
+az ad app federated-credential delete --id $APP_ID --federated-credential-id github-actions-main
+
+OWNER_ID=$(gh api /users/pushpsood --jq '.id')
+REPO_ID=$(gh api /repos/pushpsood/OneHookUxEnhancement --jq '.id')
+
+az ad app federated-credential create --id $APP_ID --parameters "{
+  \"name\": \"github-actions-main\",
+  \"issuer\": \"https://token.actions.githubusercontent.com\",
+  \"subject\": \"repo:pushpsood@${OWNER_ID}/OneHookUxEnhancement@${REPO_ID}:ref:refs/heads/main\",
+  \"audiences\": [\"api://AzureADTokenExchange\"]
+}"
+```
+
+---
+
 ## Terraform State
 
 > **Note:** Terraform state is currently stored locally within the CI runner, meaning it is ephemeral. For production use, configure a remote backend (Azure Storage) by adding a `backend` block to `main.tf`:
@@ -220,15 +273,18 @@ For production monitoring, add Azure Application Insights to the Terraform confi
 
 ```
 OneHookUxEnhancement/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml      # CI/CD pipeline (Terraform + App Service deploy)
 ├── backend/
-│   ├── index.js           # Express.js API server
-│   ├── package.json        # Dependencies and scripts
-│   └── node_modules/       # (gitignored)
+│   ├── index.js            # Express.js API server
+│   ├── package.json         # Dependencies and scripts
+│   └── node_modules/        # (gitignored)
 ├── infra/
-│   ├── main.tf             # Azure resources (App Service, OpenAI, Redis, Storage)
-│   ├── variables.tf        # Configurable variables with defaults
-│   └── outputs.tf          # Terraform outputs (hostnames, endpoints)
-├── setup-oidc.sh           # One-time Azure OIDC trust setup
+│   ├── main.tf              # Azure resources + GPT-4 Turbo deployment
+│   ├── variables.tf         # Configurable variables with defaults
+│   └── outputs.tf           # Terraform outputs (hostnames, endpoints)
+├── setup-oidc.sh            # One-time Azure OIDC trust setup
 ├── .gitignore
-└── README.md               # This file
+└── README.md                # This file
 ```
