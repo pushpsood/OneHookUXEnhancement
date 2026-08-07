@@ -72,20 +72,9 @@ resource "azurerm_cognitive_deployment" "gpt" {
   }
 
   scale {
-    type     = "Standard"
+    type     = "GlobalStandard"
     capacity = 10
   }
-}
-
-# Redis Cache for Rate Limiting
-resource "azurerm_redis_cache" "redis" {
-  name                 = var.redis_name
-  location             = azurerm_resource_group.rg.location
-  resource_group_name  = azurerm_resource_group.rg.name
-  capacity             = 0
-  family               = "C"
-  sku_name             = "Basic"
-  non_ssl_port_enabled = false
 }
 
 # App Service Plan (Linux)
@@ -120,8 +109,6 @@ resource "azurerm_linux_web_app" "app" {
     "SCM_DO_BUILD_DURING_DEPLOYMENT"      = "true"
     "AZURE_OPENAI_ENDPOINT"               = azurerm_cognitive_account.openai.endpoint
     "AZURE_OPENAI_DEPLOYMENT"             = var.openai_deployment_name
-    "REDIS_HOST"                          = azurerm_redis_cache.redis.hostname
-    "REDIS_PASSWORD"                      = azurerm_redis_cache.redis.primary_access_key
     "AZURE_STORAGE_ACCOUNT"               = azurerm_storage_account.storage.name
     "AZURE_STORAGE_CONTAINER"             = azurerm_storage_container.context_container.name
   }

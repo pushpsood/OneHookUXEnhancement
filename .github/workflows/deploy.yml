@@ -82,7 +82,15 @@ jobs:
 
       - name: Install Dependencies
         working-directory: ./backend
-        run: npm ci --omit=dev
+        run: npm ci
+
+      - name: Build TypeScript
+        working-directory: ./backend
+        run: npm run build
+
+      - name: Prune Dev Dependencies
+        working-directory: ./backend
+        run: npm prune --omit=dev
 
       - name: Azure Login
         uses: azure/login@v2
@@ -96,4 +104,4 @@ jobs:
         with:
           app-name: ${{ needs.deploy-infra.outputs.app-name }}
           package: ./backend
-          startup-command: 'node index.js'
+          startup-command: 'npm start'

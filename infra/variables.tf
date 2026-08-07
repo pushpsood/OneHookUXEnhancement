@@ -46,11 +46,6 @@ variable "openai_model_version" {
   default     = "2024-05-13"
 }
 
-variable "redis_name" {
-  description = "The name of the Redis Cache"
-  type        = string
-  default     = "onehook-redis-cache"
-}
 
 variable "storage_account_name" {
   description = "The name of the Storage Account"
