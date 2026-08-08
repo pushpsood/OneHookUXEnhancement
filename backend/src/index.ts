@@ -123,7 +123,7 @@ const fetchGitHubContext = async (query: string): Promise<string> => {
     if (!blobServiceClient) throw new Error("Blob Service not configured");
     
     const containerClient = blobServiceClient.getContainerClient(containerName);
-    const blobClient = containerClient.getBlobClient('onehookclient-context.txt');
+    const blobClient = containerClient.getBlobClient('CRUX.md');
     
     const downloadResponse = await blobClient.download(0);
     if (downloadResponse.readableStreamBody) {
