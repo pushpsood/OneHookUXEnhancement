@@ -14,3 +14,7 @@ output "storage_account_name" {
 output "openai_endpoint" {
   value = azurerm_cognitive_account.openai.endpoint
 }
+
+output "session_storage_container_name" {
+  value = azurerm_storage_container.session_container.name
+}
