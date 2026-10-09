@@ -3,15 +3,24 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { AzureOpenAI } from 'openai';
 import { DefaultAzureCredential, getBearerTokenProvider } from '@azure/identity';
-import { BlobServiceClient, ContainerClient } from '@azure/storage-blob';
+import { BlobServiceClient } from '@azure/storage-blob';
+import { loadContextualFeatureConfig } from './contextConfig';
+import { createContextualRouter } from './contextRoutes';
+import { PlaintextChatSessionStore } from './plaintextChatSessionStore';
+import { OneHookDataClient } from './oneHookDataClient';
+import { parseContextualModelResponse } from './contextPrompt';
 
 const credential = new DefaultAzureCredential();
 
 dotenv.config();
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+const corsAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+app.use(cors(corsAllowedOrigins.length > 0 ? { origin: corsAllowedOrigins } : undefined));
+app.use(express.json({ limit: '32kb' }));
 
 // In-memory data stores for Rate Limiting and Caching
 interface RateLimitData {
@@ -60,6 +69,34 @@ if (storageAccountName) {
     `https://${storageAccountName}.blob.core.windows.net`,
     credential
   );
+}
+
+// Authenticated product/connection context is isolated from anonymous chat and disabled by default.
+const contextualConfig = loadContextualFeatureConfig();
+if (contextualConfig.ready && blobServiceClient) {
+  const sessionContainer = blobServiceClient.getContainerClient(contextualConfig.sessionContainerName);
+  const sessionStore = new PlaintextChatSessionStore(sessionContainer);
+  if (contextualConfig.sessionStorageEnabled && !contextualConfig.sessionStorageReady) {
+    console.warn('[WARN] Chat session storage is enabled but unavailable:', contextualConfig.sessionMissing.join(', '));
+  }
+  const dataClient = new OneHookDataClient(
+    contextualConfig.oneHookDataApiUrl,
+    contextualConfig.oneHookDataApiScope,
+    credential,
+    contextualConfig.dataApiTimeoutMs,
+  );
+  app.use(createContextualRouter(contextualConfig, {
+    client,
+    deployment,
+    dataClient,
+    sessionStore,
+    productContextProvider: fetchGitHubContext,
+  }));
+} else {
+  if (contextualConfig.enabled) {
+    console.warn('[WARN] Contextual AI is enabled but unavailable because required settings are missing:', contextualConfig.missing.join(', '));
+  }
+  app.use(createContextualRouter(contextualConfig));
 }
 
 // Rate Limiter middleware (In-Memory)
@@ -111,7 +148,7 @@ async function streamToString(readableStream: NodeJS.ReadableStream): Promise<st
 }
 
 // Fetch context from Azure Blob Storage
-const fetchGitHubContext = async (query: string): Promise<string> => {
+async function fetchGitHubContext(query: string): Promise<string> {
   const cacheTtlMs = 10 * 60 * 1000; // 10 minutes
   const now = Date.now();
 
@@ -141,7 +178,7 @@ const fetchGitHubContext = async (query: string): Promise<string> => {
   }
   
   return cachedGithubContext!;
-};
+}
 
 // Health check endpoint for Azure App Service probes
 app.get('/health', (req: Request, res: Response) => {
@@ -162,7 +199,7 @@ interface ChatRequestBody {
     honeypot?: string;
 }
 
-app.post('/api/chat', rateLimiter, botDetector, async (req: Request<{}, {}, ChatRequestBody>, res: Response) => {
+app.post('/api/public/product-chat', rateLimiter, botDetector, async (req: Request<{}, {}, ChatRequestBody>, res: Response) => {
   try {
     const { messages, userDemographics } = req.body;
 
@@ -203,14 +240,17 @@ Ensure the output is strictly valid JSON.`;
 
     const responseText = result.choices[0]?.message?.content;
     if (responseText) {
-        const jsonResponse = JSON.parse(responseText);
-        res.json(jsonResponse);
+        const { reply, mood } = parseContextualModelResponse(responseText);
+        res.json({ reply, mood });
     } else {
         throw new Error("No response content");
     }
 
   } catch (error: any) {
-    console.error('Chatbot error:', error);
+    console.error('Chatbot error', {
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+      status: typeof error?.status === 'number' ? error.status : undefined,
+    });
     
     if (error.status) {
       if (error.status === 429) {
@@ -236,7 +276,9 @@ app.use((req: Request, res: Response) => {
 
 // Global Error Handler for uncaught exceptions and JSON parse errors
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('Unhandled error:', err);
+  console.error('Unhandled request error', {
+    errorType: err instanceof Error ? err.name : 'UnknownError',
+  });
   
   // Handle express.json() SyntaxError (malformed JSON body)
   if (err instanceof SyntaxError && 'body' in err) {
