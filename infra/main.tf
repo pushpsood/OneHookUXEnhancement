@@ -23,6 +23,7 @@ terraform {
 
 provider "azurerm" {
   features {}
+  storage_use_azuread = true
 }
 
 resource "azurerm_resource_group" "rg" {
@@ -53,12 +54,16 @@ resource "azurerm_storage_container" "context_container" {
   name                  = var.storage_container_name
   storage_account_name  = azurerm_storage_account.storage.name
   container_access_type = "private"
+
+  depends_on = [azurerm_role_assignment.storage_contributor]
 }
 
 resource "azurerm_storage_container" "session_container" {
   name                  = var.session_storage_container_name
   storage_account_name  = azurerm_storage_account.storage.name
   container_access_type = "private"
+
+  depends_on = [azurerm_role_assignment.storage_contributor]
 }
 
 resource "azurerm_storage_management_policy" "session_retention" {
@@ -160,7 +165,7 @@ resource "azurerm_linux_web_app" "app" {
 
   app_settings = {
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
-    "SCM_DO_BUILD_DURING_DEPLOYMENT"      = "true"
+    "SCM_DO_BUILD_DURING_DEPLOYMENT"      = "false"
     "AZURE_OPENAI_ENDPOINT"               = azurerm_cognitive_account.openai.endpoint
     "AZURE_OPENAI_DEPLOYMENT"             = var.openai_deployment_name
     "AZURE_STORAGE_ACCOUNT"               = azurerm_storage_account.storage.name

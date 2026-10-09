@@ -57,7 +57,7 @@ jobs:
 
       - name: Terraform Apply
         working-directory: ./infra
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply tfplan
 
       - name: Export Terraform Outputs
         id: tf-output
