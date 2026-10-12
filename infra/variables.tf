@@ -176,9 +176,9 @@ variable "chat_session_storage_enabled" {
 }
 
 variable "auth_tier_claim" {
-  description = "Verified Cognito token claim containing the tier; use cognito:groups to resolve against groups"
+  description = "Verified Cognito token claim containing the tier (canonical wire FREE/GOLD/PLATINUM or Must/Super/Infinity alias); use cognito:groups to resolve against groups"
   type        = string
-  default     = "custom:tier"
+  default     = "custom:subscriptionTier"
 }
 
 variable "chat_session_max_retention_days" {
@@ -193,7 +193,7 @@ variable "chat_session_max_retention_days" {
 }
 
 variable "chat_session_tier_policies" {
-  description = "Server-side policies keyed by normalized Cognito tier; omitted/disabled tiers cannot persist sessions"
+  description = "Server-side Mr OneHook AI-session policies keyed by tier (canonical wire gold/platinum or the Super/Infinity aliases; normalized server-side). Must (FREE) is intentionally absent — the free tier does not get persisted AI sessions, per the membership matrix. Super (GOLD) and Infinity (PLATINUM) do."
   type = map(object({
     enabled        = bool
     max_sessions   = number
@@ -201,9 +201,17 @@ variable "chat_session_tier_policies" {
     retention_days = number
   }))
   default = {
-    premium = {
+    # Super (GOLD): unlimited Mr OneHook AI per the membership matrix; persisted sessions enabled.
+    gold = {
       enabled        = true
       max_sessions   = 10
+      max_messages   = 50
+      retention_days = 30
+    }
+    # Infinity (PLATINUM): up to 3 concurrent connections, so a higher session allowance.
+    platinum = {
+      enabled        = true
+      max_sessions   = 25
       max_messages   = 50
       retention_days = 30
     }

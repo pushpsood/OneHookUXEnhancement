@@ -125,14 +125,19 @@ test('session storage becomes ready only with a valid bounded tier policy', () =
   };
   const valid = loadContextualFeatureConfig({
     ...base,
+    // Keys may be canonical wire values OR Must/Super/Infinity aliases — both normalize to the
+    // canonical lowercase wire tier. Super (GOLD) + Infinity (PLATINUM) get AI sessions; Must (FREE)
+    // is disabled, matching the membership matrix.
     CHAT_SESSION_TIER_POLICIES: JSON.stringify({
-      Premium: { enabled: true, maxSessions: 10, maxMessages: 50, retentionDays: 30 },
-      free: { enabled: false, maxSessions: 1, maxMessages: 2, retentionDays: 1 },
+      Super: { enabled: true, maxSessions: 10, maxMessages: 50, retentionDays: 30 },
+      PLATINUM: { enabled: true, maxSessions: 25, maxMessages: 50, retentionDays: 30 },
+      Must: { enabled: false, maxSessions: 1, maxMessages: 2, retentionDays: 1 },
     }),
   });
   assert.equal(valid.sessionStorageReady, true);
   assert.deepEqual(valid.sessionTierPolicies, {
-    premium: { maxSessions: 10, maxMessages: 50, retentionDays: 30 },
+    gold: { maxSessions: 10, maxMessages: 50, retentionDays: 30 },
+    platinum: { maxSessions: 25, maxMessages: 50, retentionDays: 30 },
   });
 
   const invalid = loadContextualFeatureConfig({
@@ -142,6 +147,31 @@ test('session storage becomes ready only with a valid bounded tier policy', () =
   assert.equal(invalid.ready, true, 'ordinary contextual chat remains available');
   assert.equal(invalid.sessionStorageReady, false);
   assert.ok(invalid.sessionMissing.includes('CHAT_SESSION_TIER_POLICIES'));
+
+  // A policy whose only key is an unrecognised tier (e.g. the old `premium`) normalizes to nothing,
+  // so session storage is NOT ready — this is the exact mismatch that previously broke gating.
+  const stale = loadContextualFeatureConfig({
+    ...base,
+    CHAT_SESSION_TIER_POLICIES: JSON.stringify({
+      premium: { enabled: true, maxSessions: 10, maxMessages: 50, retentionDays: 30 },
+    }),
+  });
+  assert.deepEqual(stale.sessionTierPolicies, {});
+  assert.equal(stale.sessionStorageReady, false);
+});
+
+test('tier resolution maps wire values AND Must/Super/Infinity aliases to the canonical policy key', () => {
+  // Policies keyed by canonical wire tiers (what the Terraform default produces).
+  const tiers = { gold: {}, platinum: {} };
+  // The real Cognito attribute carries the WIRE value.
+  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'GOLD' }, 'custom:subscriptionTier', tiers), 'gold');
+  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'PLATINUM' }, 'custom:subscriptionTier', tiers), 'platinum');
+  // A token (or stale client) carrying the display alias still resolves.
+  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': ' Super ' }, 'custom:subscriptionTier', tiers), 'gold');
+  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'Infinity' }, 'custom:subscriptionTier', tiers), 'platinum');
+  // Must (FREE) has no persisted-session policy → undefined (not eligible).
+  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'FREE' }, 'custom:subscriptionTier', tiers), undefined);
+  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'Must' }, 'custom:subscriptionTier', tiers), undefined);
 });
 
 test('Cognito tier resolution supports custom claims and configured groups only', () => {

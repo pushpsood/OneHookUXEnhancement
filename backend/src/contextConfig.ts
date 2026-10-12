@@ -36,6 +36,34 @@ export interface ChatSessionTierPolicy {
   retentionDays: number;
 }
 
+/**
+ * Canonical tier key used for session-policy lookup.
+ *
+ * The backend's subscription-tier WIRE values are frozen as `FREE`/`GOLD`/`PLATINUM` (see
+ * `SubscriptionTier.java`), while the product/marketing DISPLAY names are `Must`/`Super`/`Infinity`
+ * (the iOS membership page is the source of truth). A member's token may carry either form depending
+ * on which attribute/claim populated it, so both the policy keys and the token claim are normalised
+ * through this one function to a canonical lowercase wire value. That means a policy keyed `gold`,
+ * `GOLD`, or `super` all resolve the same, and a claim of `GOLD`/`Super`/`super` all match it.
+ */
+export function normalizeTier(raw: string | undefined | null): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const normalized = raw.trim().toUpperCase();
+  switch (normalized) {
+    case 'FREE':
+    case 'MUST':
+      return 'free';
+    case 'GOLD':
+    case 'SUPER':
+      return 'gold';
+    case 'PLATINUM':
+    case 'INFINITY':
+      return 'platinum';
+    default:
+      return undefined;
+  }
+}
+
 function parseTierPolicies(raw: string | undefined, maxRetentionDays: number): Record<string, ChatSessionTierPolicy> {
   if (!raw) return {};
   try {
@@ -43,8 +71,11 @@ function parseTierPolicies(raw: string | undefined, maxRetentionDays: number): R
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
     const policies: Record<string, ChatSessionTierPolicy> = {};
     for (const [rawTier, value] of Object.entries(parsed as Record<string, unknown>)) {
-      const tier = rawTier.trim().toLowerCase();
-      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(tier)
+      // Normalise the policy KEY to a canonical wire tier (free/gold/platinum). A key that is not a
+      // recognised tier (wire or Must/Super/Infinity alias) is ignored, so a stale `premium` key can
+      // never silently gate anything.
+      const tier = normalizeTier(rawTier);
+      if (!tier
         || typeof value !== 'object'
         || value === null
         || Array.isArray(value)) continue;
@@ -128,7 +159,10 @@ export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env
   const missing = required.filter(([, value]) => value.length === 0).map(([name]) => name);
 
   const sessionStorageEnabled = readBoolean(env.CHAT_SESSION_STORAGE_ENABLED, false);
-  const sessionTierClaim = env.AUTH_TIER_CLAIM?.trim() ?? 'custom:tier';
+  // The Cognito token claim carrying the subscription tier. Defaults to the ACTUAL custom attribute
+  // the backend/Identity writes (`custom:subscriptionTier`); the old `custom:tier` default never
+  // existed on the pool, so tier resolution always failed. Can be overridden to `cognito:groups`.
+  const sessionTierClaim = env.AUTH_TIER_CLAIM?.trim() ?? 'custom:subscriptionTier';
   const sessionMaxRetentionDays = readInteger(env.CHAT_SESSION_MAX_RETENTION_DAYS, 90, 1, 365);
   const sessionTierPolicies = parseTierPolicies(env.CHAT_SESSION_TIER_POLICIES, sessionMaxRetentionDays);
   const sessionMissing: string[] = [];

@@ -1,6 +1,6 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import type { NextFunction, Request, Response } from 'express';
-import type { ContextualFeatureConfig } from './contextConfig';
+import { normalizeTier, type ContextualFeatureConfig } from './contextConfig';
 import type { AuthenticatedPrincipal } from './contextTypes';
 
 declare global {
@@ -36,7 +36,10 @@ export function resolveSessionTier(
     ? [claim]
     : Array.isArray(claim) ? claim.filter((value): value is string => typeof value === 'string') : [];
   for (const candidate of candidates) {
-    const normalized = candidate.trim().toLowerCase();
+    // Prefer the canonical wire tier (so a claim of GOLD / Super / gold all map to a policy keyed
+    // `gold`). Fall back to a plain lowercase match so a custom cognito:groups tier name that isn't
+    // one of the standard three can still be configured directly.
+    const normalized = normalizeTier(candidate) ?? candidate.trim().toLowerCase();
     if (normalized.length > 0 && Object.prototype.hasOwnProperty.call(configuredTiers, normalized)) {
       return normalized;
     }
