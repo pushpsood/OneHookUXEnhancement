@@ -13,6 +13,8 @@ export interface ContextualFeatureConfig {
   oneHookDataApiAuthMode: 'sigv4' | 'bearer';
   oneHookDataApiAwsRegion: string;
   oneHookDataApiAwsService: string;
+  oneHookDataApiAwsRoleArn: string;
+  oneHookDataApiAwsWebIdentityAudience: string;
   storageAccountName: string;
   sessionContainerName: string;
   maxInputCharacters: number;
@@ -87,6 +89,11 @@ export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env
     ?? env.AWS_REGION?.trim()
     ?? '';
   const awsService = env.ONEHOOK_DATA_API_AWS_SERVICE?.trim() || 'execute-api';
+  // Optional cross-cloud web-identity: when both are set, the backend exchanges an Azure
+  // managed-identity token for AWS credentials via STS AssumeRoleWithWebIdentity instead of relying
+  // on the ambient AWS provider chain. Absence falls back to fromNodeProviderChain.
+  const awsRoleArn = env.ONEHOOK_DATA_API_AWS_ROLE_ARN?.trim() ?? '';
+  const awsWebIdentityAudience = env.ONEHOOK_DATA_API_AWS_WEB_IDENTITY_AUDIENCE?.trim() ?? '';
   const values = {
     authIssuer: env.AUTH_ISSUER?.trim() ?? '',
     authAudience: env.AUTH_AUDIENCE?.trim() ?? '',
@@ -97,6 +104,8 @@ export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env
     oneHookDataApiAuthMode: authMode,
     oneHookDataApiAwsRegion: awsRegion,
     oneHookDataApiAwsService: awsService,
+    oneHookDataApiAwsRoleArn: awsRoleArn,
+    oneHookDataApiAwsWebIdentityAudience: awsWebIdentityAudience,
     storageAccountName: env.AZURE_STORAGE_ACCOUNT?.trim() ?? '',
     sessionContainerName: env.AZURE_SESSION_CONTAINER?.trim() ?? '',
   };

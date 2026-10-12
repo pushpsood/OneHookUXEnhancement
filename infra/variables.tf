@@ -68,7 +68,7 @@ variable "session_storage_container_name" {
 variable "contextual_ai_enabled" {
   description = "Enable authenticated contextual routes after all integration values are configured"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "auth_issuer" {
@@ -122,6 +122,18 @@ variable "onehook_data_api_aws_region" {
   description = "AWS region of the data API's API Gateway, used to SigV4-sign requests to the AWS_IAM route"
   type        = string
   default     = "ap-south-1"
+}
+
+variable "onehook_data_api_aws_role_arn" {
+  description = "AWS IAM role ARN the App Service managed identity assumes (via STS web-identity) to call the ai-context route; empty disables the cross-cloud exchange"
+  type        = string
+  default     = "arn:aws:iam::627367419734:role/OneHook-UX-AiContext-gamma"
+}
+
+variable "onehook_data_api_aws_web_identity_audience" {
+  description = "Entra audience the managed identity requests and the AWS role's OIDC trust expects (e.g. api://<appId>)"
+  type        = string
+  default     = "api://8a078d5e-ad9d-4156-b89d-419871233992"
 }
 
 variable "ephemeral_context_max_messages" {

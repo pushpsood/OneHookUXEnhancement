@@ -9,6 +9,7 @@ import { createContextualRouter } from './contextRoutes';
 import { PlaintextChatSessionStore } from './plaintextChatSessionStore';
 import { OneHookDataClient, BearerTokenSigner, type RequestSigner } from './oneHookDataClient';
 import { SigV4RequestSigner } from './sigv4Signer';
+import { createAzureWebIdentityCredentialProvider } from './azureAwsCredentials';
 import { parseContextualModelResponse } from './contextPrompt';
 
 const credential = new DefaultAzureCredential();
@@ -83,12 +84,33 @@ if (contextualConfig.ready && blobServiceClient) {
   // Choose how we authenticate to the authoritative data API. The AWS AI-context route is
   // AuthorizationType AWS_IAM, so SigV4 is the default; a token-authorized deployment can opt into
   // bearer auth via ONEHOOK_DATA_API_AUTH_MODE=bearer.
-  const dataApiSigner: RequestSigner = contextualConfig.oneHookDataApiAuthMode === 'bearer'
-    ? new BearerTokenSigner(credential, contextualConfig.oneHookDataApiScope)
-    : new SigV4RequestSigner(
-        contextualConfig.oneHookDataApiAwsRegion,
-        contextualConfig.oneHookDataApiAwsService,
-      );
+  let dataApiSigner: RequestSigner;
+  if (contextualConfig.oneHookDataApiAuthMode === 'bearer') {
+    dataApiSigner = new BearerTokenSigner(credential, contextualConfig.oneHookDataApiScope);
+  } else if (
+    contextualConfig.oneHookDataApiAwsRoleArn
+    && contextualConfig.oneHookDataApiAwsWebIdentityAudience
+  ) {
+    // Cross-cloud: exchange the Azure managed-identity token for AWS credentials via STS
+    // AssumeRoleWithWebIdentity, then SigV4-sign. No long-lived AWS keys live on the App Service.
+    const awsCredentials = createAzureWebIdentityCredentialProvider({
+      credential,
+      audience: contextualConfig.oneHookDataApiAwsWebIdentityAudience,
+      roleArn: contextualConfig.oneHookDataApiAwsRoleArn,
+      region: contextualConfig.oneHookDataApiAwsRegion,
+    });
+    dataApiSigner = new SigV4RequestSigner(
+      contextualConfig.oneHookDataApiAwsRegion,
+      contextualConfig.oneHookDataApiAwsService,
+      awsCredentials,
+    );
+  } else {
+    // Fall back to the ambient AWS provider chain (env/web-identity file/instance role).
+    dataApiSigner = new SigV4RequestSigner(
+      contextualConfig.oneHookDataApiAwsRegion,
+      contextualConfig.oneHookDataApiAwsService,
+    );
+  }
   const dataClient = OneHookDataClient.withSigner(
     contextualConfig.oneHookDataApiUrl,
     dataApiSigner,
