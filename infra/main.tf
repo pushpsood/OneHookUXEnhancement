@@ -4,7 +4,7 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 3.0"
+      version = "~> 4.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -52,7 +52,7 @@ resource "azurerm_storage_account" "storage" {
 
 resource "azurerm_storage_container" "context_container" {
   name                  = var.storage_container_name
-  storage_account_name  = azurerm_storage_account.storage.name
+  storage_account_id    = azurerm_storage_account.storage.id
   container_access_type = "private"
 
   depends_on = [azurerm_role_assignment.storage_contributor]
@@ -60,7 +60,7 @@ resource "azurerm_storage_container" "context_container" {
 
 resource "azurerm_storage_container" "session_container" {
   name                  = var.session_storage_container_name
-  storage_account_name  = azurerm_storage_account.storage.name
+  storage_account_id    = azurerm_storage_account.storage.id
   container_access_type = "private"
 
   depends_on = [azurerm_role_assignment.storage_contributor]
@@ -130,8 +130,8 @@ resource "azurerm_cognitive_deployment" "gpt" {
     version = var.openai_model_version
   }
 
-  scale {
-    type     = "Standard"
+  sku {
+    name     = "Standard"
     capacity = 10
   }
 }
@@ -160,7 +160,8 @@ resource "azurerm_linux_web_app" "app" {
     application_stack {
       node_version = "20-lts"
     }
-    health_check_path = "/health"
+    health_check_path                 = "/health"
+    health_check_eviction_time_in_min = 5
   }
 
   app_settings = {
@@ -178,6 +179,8 @@ resource "azurerm_linux_web_app" "app" {
     "CORS_ALLOWED_ORIGINS"                = join(",", var.cors_allowed_origins)
     "ONEHOOK_DATA_API_URL"                = var.onehook_data_api_url
     "ONEHOOK_DATA_API_SCOPE"              = var.onehook_data_api_scope
+    "ONEHOOK_DATA_API_AUTH_MODE"          = var.onehook_data_api_auth_mode
+    "ONEHOOK_DATA_API_AWS_REGION"         = var.onehook_data_api_aws_region
     "EPHEMERAL_CONTEXT_MAX_MESSAGES"      = tostring(var.ephemeral_context_max_messages)
     "EPHEMERAL_CONTEXT_MAX_CHARACTERS"    = tostring(var.ephemeral_context_max_characters)
     "CONTEXT_REQUEST_MAX_MESSAGES"        = tostring(var.context_request_max_messages)

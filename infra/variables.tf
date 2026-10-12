@@ -102,9 +102,26 @@ variable "onehook_data_api_url" {
 }
 
 variable "onehook_data_api_scope" {
-  description = "Managed-identity OAuth scope for the authoritative OneHook data API"
+  description = "Managed-identity OAuth scope for the authoritative OneHook data API (bearer auth mode only)"
   type        = string
   default     = "https://api.gamma.onehook.club/.default"
+}
+
+variable "onehook_data_api_auth_mode" {
+  description = "How the backend authenticates to the data API: 'sigv4' (AWS_IAM route) or 'bearer' (token authorizer)"
+  type        = string
+  default     = "sigv4"
+
+  validation {
+    condition     = contains(["sigv4", "bearer"], var.onehook_data_api_auth_mode)
+    error_message = "onehook_data_api_auth_mode must be 'sigv4' or 'bearer'."
+  }
+}
+
+variable "onehook_data_api_aws_region" {
+  description = "AWS region of the data API's API Gateway, used to SigV4-sign requests to the AWS_IAM route"
+  type        = string
+  default     = "ap-south-1"
 }
 
 variable "ephemeral_context_max_messages" {

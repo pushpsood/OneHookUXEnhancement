@@ -20,6 +20,7 @@ test('contextual feature becomes ready only with every integration setting', () 
     CORS_ALLOWED_ORIGINS: 'https://app.onehook.example',
     ONEHOOK_DATA_API_URL: 'https://data.example/',
     ONEHOOK_DATA_API_SCOPE: 'api://data/.default',
+    ONEHOOK_DATA_API_AWS_REGION: 'ap-south-1',
     AZURE_STORAGE_ACCOUNT: 'storage',
     AZURE_SESSION_CONTAINER: 'aisessions',
     EPHEMERAL_CONTEXT_MAX_MESSAGES: '500',
@@ -27,6 +28,42 @@ test('contextual feature becomes ready only with every integration setting', () 
   assert.equal(config.ready, true);
   assert.equal(config.oneHookDataApiUrl, 'https://data.example');
   assert.equal(config.maxEphemeralMessages, 30, 'out-of-range limits use the safe default');
+});
+
+test('data API auth mode decides which integration setting is required', () => {
+  const base = {
+    CONTEXTUAL_AI_ENABLED: 'true',
+    AUTH_ISSUER: 'https://issuer.example',
+    AUTH_AUDIENCE: 'user-api',
+    AUTH_JWKS_URI: 'https://issuer.example/jwks',
+    CORS_ALLOWED_ORIGINS: 'https://app.example',
+    ONEHOOK_DATA_API_URL: 'https://api.gamma.onehook.club',
+    AZURE_STORAGE_ACCOUNT: 'storage',
+    AZURE_SESSION_CONTAINER: 'aisessions',
+  };
+
+  // Default (sigv4): a region is required; a scope is not.
+  const sigv4Missing = loadContextualFeatureConfig(base);
+  assert.equal(sigv4Missing.oneHookDataApiAuthMode, 'sigv4');
+  assert.equal(sigv4Missing.ready, false);
+  assert.ok(sigv4Missing.missing.includes('ONEHOOK_DATA_API_AWS_REGION'));
+
+  const sigv4Ready = loadContextualFeatureConfig({ ...base, ONEHOOK_DATA_API_AWS_REGION: 'ap-south-1' });
+  assert.equal(sigv4Ready.ready, true);
+  assert.equal(sigv4Ready.oneHookDataApiAwsService, 'execute-api');
+
+  // Bearer mode: a scope is required; a region is not.
+  const bearerMissing = loadContextualFeatureConfig({ ...base, ONEHOOK_DATA_API_AUTH_MODE: 'bearer' });
+  assert.equal(bearerMissing.oneHookDataApiAuthMode, 'bearer');
+  assert.equal(bearerMissing.ready, false);
+  assert.ok(bearerMissing.missing.includes('ONEHOOK_DATA_API_SCOPE'));
+
+  const bearerReady = loadContextualFeatureConfig({
+    ...base,
+    ONEHOOK_DATA_API_AUTH_MODE: 'bearer',
+    ONEHOOK_DATA_API_SCOPE: 'api://data/.default',
+  });
+  assert.equal(bearerReady.ready, true);
 });
 
 test('permissions combine OAuth scopes and roles', () => {
@@ -63,6 +100,7 @@ test('symmetric JWT algorithms are rejected', () => {
     CORS_ALLOWED_ORIGINS: 'https://app.onehook.example',
     ONEHOOK_DATA_API_URL: 'https://data.example',
     ONEHOOK_DATA_API_SCOPE: 'api://data/.default',
+    ONEHOOK_DATA_API_AWS_REGION: 'ap-south-1',
     AZURE_STORAGE_ACCOUNT: 'storage',
     AZURE_SESSION_CONTAINER: 'aisessions',
     AUTH_ALLOWED_ALGORITHMS: 'HS256',
@@ -80,6 +118,7 @@ test('session storage becomes ready only with a valid bounded tier policy', () =
     CORS_ALLOWED_ORIGINS: 'https://app.example',
     ONEHOOK_DATA_API_URL: 'https://data.example',
     ONEHOOK_DATA_API_SCOPE: 'scope',
+    ONEHOOK_DATA_API_AWS_REGION: 'ap-south-1',
     AZURE_STORAGE_ACCOUNT: 'storage',
     AZURE_SESSION_CONTAINER: 'aisessions',
     CHAT_SESSION_STORAGE_ENABLED: 'true',

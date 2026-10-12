@@ -24,7 +24,7 @@ test('authoritative match projection must bind requesting user', async () => {
     matchedUser: { id: 'user-2', visibleProfile: {} },
     contextPolicy: { profileAllowed: true, messageHistoryAllowed: true, policyVersion: '1' },
   }), { status: 200, headers: { 'content-type': 'application/json' } });
-  const client = new OneHookDataClient('https://data.example', 'scope', credential, 1000, fetchImpl);
+  const client = OneHookDataClient.withBearer('https://data.example', 'scope', credential, 1000, fetchImpl);
   await assert.rejects(() => client.getAiVisibleMatch('user-1', 'match-1'), MatchContextAccessError);
 });
 

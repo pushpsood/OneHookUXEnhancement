@@ -7,7 +7,8 @@ import { BlobServiceClient } from '@azure/storage-blob';
 import { loadContextualFeatureConfig } from './contextConfig';
 import { createContextualRouter } from './contextRoutes';
 import { PlaintextChatSessionStore } from './plaintextChatSessionStore';
-import { OneHookDataClient } from './oneHookDataClient';
+import { OneHookDataClient, BearerTokenSigner, type RequestSigner } from './oneHookDataClient';
+import { SigV4RequestSigner } from './sigv4Signer';
 import { parseContextualModelResponse } from './contextPrompt';
 
 const credential = new DefaultAzureCredential();
@@ -79,10 +80,18 @@ if (contextualConfig.ready && blobServiceClient) {
   if (contextualConfig.sessionStorageEnabled && !contextualConfig.sessionStorageReady) {
     console.warn('[WARN] Chat session storage is enabled but unavailable:', contextualConfig.sessionMissing.join(', '));
   }
-  const dataClient = new OneHookDataClient(
+  // Choose how we authenticate to the authoritative data API. The AWS AI-context route is
+  // AuthorizationType AWS_IAM, so SigV4 is the default; a token-authorized deployment can opt into
+  // bearer auth via ONEHOOK_DATA_API_AUTH_MODE=bearer.
+  const dataApiSigner: RequestSigner = contextualConfig.oneHookDataApiAuthMode === 'bearer'
+    ? new BearerTokenSigner(credential, contextualConfig.oneHookDataApiScope)
+    : new SigV4RequestSigner(
+        contextualConfig.oneHookDataApiAwsRegion,
+        contextualConfig.oneHookDataApiAwsService,
+      );
+  const dataClient = OneHookDataClient.withSigner(
     contextualConfig.oneHookDataApiUrl,
-    contextualConfig.oneHookDataApiScope,
-    credential,
+    dataApiSigner,
     contextualConfig.dataApiTimeoutMs,
   );
   app.use(createContextualRouter(contextualConfig, {

@@ -10,6 +10,9 @@ export interface ContextualFeatureConfig {
   userChatPermission: string;
   oneHookDataApiUrl: string;
   oneHookDataApiScope: string;
+  oneHookDataApiAuthMode: 'sigv4' | 'bearer';
+  oneHookDataApiAwsRegion: string;
+  oneHookDataApiAwsService: string;
   storageAccountName: string;
   sessionContainerName: string;
   maxInputCharacters: number;
@@ -75,6 +78,15 @@ function readInteger(value: string | undefined, fallback: number, min: number, m
 
 export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env): ContextualFeatureConfig {
   const enabled = readBoolean(env.CONTEXTUAL_AI_ENABLED, false);
+  // How the backend authenticates to the authoritative data API. 'sigv4' (default) targets the AWS
+  // API Gateway AI-context route (AuthorizationType AWS_IAM); 'bearer' targets a token-authorized
+  // endpoint and uses ONEHOOK_DATA_API_SCOPE. The mode decides which settings are required.
+  const authMode: 'sigv4' | 'bearer' =
+    (env.ONEHOOK_DATA_API_AUTH_MODE?.trim().toLowerCase() === 'bearer') ? 'bearer' : 'sigv4';
+  const awsRegion = env.ONEHOOK_DATA_API_AWS_REGION?.trim()
+    ?? env.AWS_REGION?.trim()
+    ?? '';
+  const awsService = env.ONEHOOK_DATA_API_AWS_SERVICE?.trim() || 'execute-api';
   const values = {
     authIssuer: env.AUTH_ISSUER?.trim() ?? '',
     authAudience: env.AUTH_AUDIENCE?.trim() ?? '',
@@ -82,6 +94,9 @@ export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env
     corsAllowedOrigins: (env.CORS_ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean),
     oneHookDataApiUrl: env.ONEHOOK_DATA_API_URL?.trim().replace(/\/$/, '') ?? '',
     oneHookDataApiScope: env.ONEHOOK_DATA_API_SCOPE?.trim() ?? '',
+    oneHookDataApiAuthMode: authMode,
+    oneHookDataApiAwsRegion: awsRegion,
+    oneHookDataApiAwsService: awsService,
     storageAccountName: env.AZURE_STORAGE_ACCOUNT?.trim() ?? '',
     sessionContainerName: env.AZURE_SESSION_CONTAINER?.trim() ?? '',
   };
@@ -92,9 +107,14 @@ export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env
     ['AUTH_JWKS_URI', values.authJwksUri],
     ['CORS_ALLOWED_ORIGINS', values.corsAllowedOrigins.join(',')],
     ['ONEHOOK_DATA_API_URL', values.oneHookDataApiUrl],
-    ['ONEHOOK_DATA_API_SCOPE', values.oneHookDataApiScope],
     ['AZURE_STORAGE_ACCOUNT', values.storageAccountName],
     ['AZURE_SESSION_CONTAINER', values.sessionContainerName],
+    // Mode-specific: SigV4 needs a region; bearer needs a scope. Enforcing per-mode keeps the
+    // readiness check honest — a SigV4 deployment is not blocked by a missing OAuth scope, and a
+    // bearer deployment is not silently unauthenticated for lack of a region.
+    ...(authMode === 'sigv4'
+      ? ([['ONEHOOK_DATA_API_AWS_REGION', values.oneHookDataApiAwsRegion]] as Array<[string, string]>)
+      : ([['ONEHOOK_DATA_API_SCOPE', values.oneHookDataApiScope]] as Array<[string, string]>)),
   ];
   const missing = required.filter(([, value]) => value.length === 0).map(([name]) => name);
 
