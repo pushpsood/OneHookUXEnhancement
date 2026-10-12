@@ -170,9 +170,9 @@ variable "context_request_max_messages" {
 }
 
 variable "chat_session_storage_enabled" {
-  description = "Enable Cognito-tier-gated Mr OneHook chat-session persistence"
+  description = "Enable Cognito-tier-gated Mr OneHook chat-session persistence (Super/Infinity only, per the tier policies). Requires the private aisessions blob container + the App Service identity's Storage Blob Data Contributor role on it (provisioned in main.tf)."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "auth_tier_claim" {
