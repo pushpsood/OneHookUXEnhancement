@@ -96,9 +96,9 @@ variable "auth_jwks_uri" {
 }
 
 variable "onehook_data_api_url" {
-  description = "Base URL of the authoritative OneHook AI-visible match projection API"
+  description = "Base URL of the authoritative OneHook AI-visible match projection API. For SigV4 (AWS_IAM) auth this MUST be the API Gateway execute-api invoke URL, not the CloudFront ingress — SigV4 signs the Host header, and the ingress rewrites Host to the origin, so signing against the ingress host would 403."
   type        = string
-  default     = "https://api.gamma.onehook.club"
+  default     = "https://n74oye7v0i.execute-api.ap-south-1.amazonaws.com/prod"
 }
 
 variable "onehook_data_api_scope" {
