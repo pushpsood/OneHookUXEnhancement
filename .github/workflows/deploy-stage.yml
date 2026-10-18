@@ -1,0 +1,93 @@
+name: Deploy UX Enhancement stage
+
+# Reusable: Terraform + App Service deploy + smoke test for ONE stage. Called by deploy.yml.
+# Deliberately has no `environment:` — the Azure OIDC federated credential trusts the token subject
+# `repo:<owner>/<repo>:ref:refs/heads/main`, and an environment would change that subject and break
+# login. The prod approval gate therefore lives in a separate job in deploy.yml.
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        description: 'gamma | prod'
+        type: string
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_USE_OIDC: true
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.stage }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.x
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        working-directory: ./infra
+        run: terraform init -input=false -backend-config=stages/${{ inputs.stage }}.backend.hcl
+
+      - name: Terraform Plan
+        working-directory: ./infra
+        run: terraform plan -input=false -var-file=stages/${{ inputs.stage }}.tfvars -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ./infra
+        run: terraform apply -input=false tfplan
+
+      - name: Export Terraform Outputs
+        id: tf
+        working-directory: ./infra
+        run: |
+          echo "app_name=$(terraform output -raw app_service_name)" >> "$GITHUB_OUTPUT"
+          echo "url=$(terraform output -raw chatbot_url)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Build Production Package
+        working-directory: ./backend
+        run: |
+          npm ci
+          npm run build
+          rm -rf dist/__tests__
+          npm prune --omit=dev
+
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ steps.tf.outputs.app_name }}
+          package: ./backend
+          startup-command: 'npm start'
+
+      - name: Smoke Test (custom domain /health)
+        run: |
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.tf.outputs.url }}/health" || true)
+            [ "$code" = "200" ] && { echo "healthy: ${{ steps.tf.outputs.url }}"; exit 0; }
+            echo "attempt $i: HTTP $code"; sleep 15
+          done
+          echo "::error::${{ steps.tf.outputs.url }}/health did not return 200"; exit 1

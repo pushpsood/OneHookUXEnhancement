@@ -1,11 +1,16 @@
 name: Deploy UX Enhancement (Infra + Backend)
 
-# Two fully isolated stages, deployed in order: gamma, then prod.
+# Two fully isolated stages, deployed in order: gamma, then — after a MANUAL APPROVAL — prod.
 #   gamma -> https://chatbot.gamma.onehook.club   (state key terraform.tfstate)
 #   prod  -> https://chatbot.onehook.club         (state key prod.terraform.tfstate)
 # Each stage's Terraform state + variables live in infra/stages/<stage>.{backend.hcl,tfvars}.
 # The Route53 records for both custom domains are owned by the OneHookClient frontend CDK
 # (OneHook-ChatbotDns-prod); they must exist before a stage sets custom_domain_enabled = true.
+#
+# Prod approval: the `approve-prod` job targets the `prod-approval` GitHub environment, which has
+# required reviewers. The run pauses there after gamma succeeds until a reviewer approves (or
+# rejects) it in the Actions UI. That job never touches Azure; the deploy jobs run the reusable
+# deploy-stage.yml with no environment, so the Azure OIDC token subject stays ref:refs/heads/main.
 
 on:
   push:
@@ -15,6 +20,7 @@ on:
       - 'backend/**'
       - 'infra/**'
       - '.github/workflows/deploy.yml'
+      - '.github/workflows/deploy-stage.yml'
   workflow_dispatch:
     inputs:
       stage:
@@ -30,12 +36,6 @@ concurrency:
 permissions:
   id-token: write
   contents: read
-
-env:
-  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  ARM_USE_OIDC: true
 
 jobs:
   test-backend:
@@ -55,100 +55,38 @@ jobs:
         working-directory: ./backend
         run: npm test
 
-  deploy:
-    name: Deploy ${{ matrix.stage }}
+  deploy-gamma:
+    name: Gamma
     needs: test-backend
+    if: (github.event.inputs.stage || 'all') != 'prod'
+    uses: ./.github/workflows/deploy-stage.yml
+    with:
+      stage: gamma
+    secrets: inherit
+
+  approve-prod:
+    name: Approve prod
+    needs: [test-backend, deploy-gamma]
+    # Runs after gamma succeeds, or straight after the tests for a prod-only manual run. Never runs
+    # if gamma failed or was cancelled.
+    if: >-
+      always()
+      && needs.test-backend.result == 'success'
+      && (github.event.inputs.stage || 'all') != 'gamma'
+      && (needs.deploy-gamma.result == 'success' || needs.deploy-gamma.result == 'skipped')
     runs-on: ubuntu-latest
-    strategy:
-      # Sequential: prod only deploys after gamma succeeds.
-      max-parallel: 1
-      fail-fast: true
-      matrix:
-        stage: [gamma, prod]
-    # No GitHub `environment:` here: the Azure OIDC federated credential trusts the subject
-    # `ref:refs/heads/main`, and an environment would change the token subject and break login.
+    environment:
+      name: prod-approval
+      url: https://chatbot.onehook.club
     steps:
-      - name: Skip stages not selected
-        id: gate
-        run: |
-          selected="${{ github.event.inputs.stage || 'all' }}"
-          if [ "$selected" = "all" ] || [ "$selected" = "${{ matrix.stage }}" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Approved
+        run: echo "Prod deploy of ${GITHUB_SHA} approved by ${{ github.actor }} after gamma passed."
 
-      - uses: actions/checkout@v4
-        if: steps.gate.outputs.run == 'true'
-
-      - name: Setup Terraform
-        if: steps.gate.outputs.run == 'true'
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.x
-          terraform_wrapper: false
-
-      - name: Azure Login
-        if: steps.gate.outputs.run == 'true'
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Terraform Init
-        if: steps.gate.outputs.run == 'true'
-        working-directory: ./infra
-        run: terraform init -input=false -backend-config=stages/${{ matrix.stage }}.backend.hcl
-
-      - name: Terraform Plan
-        if: steps.gate.outputs.run == 'true'
-        working-directory: ./infra
-        run: terraform plan -input=false -var-file=stages/${{ matrix.stage }}.tfvars -out=tfplan
-
-      - name: Terraform Apply
-        if: steps.gate.outputs.run == 'true'
-        working-directory: ./infra
-        run: terraform apply -input=false tfplan
-
-      - name: Export Terraform Outputs
-        if: steps.gate.outputs.run == 'true'
-        id: tf
-        working-directory: ./infra
-        run: |
-          echo "app_name=$(terraform output -raw app_service_name)" >> "$GITHUB_OUTPUT"
-          echo "url=$(terraform output -raw chatbot_url)" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/setup-node@v4
-        if: steps.gate.outputs.run == 'true'
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: backend/package-lock.json
-
-      - name: Build Production Package
-        if: steps.gate.outputs.run == 'true'
-        working-directory: ./backend
-        run: |
-          npm ci
-          npm run build
-          rm -rf dist/__tests__
-          npm prune --omit=dev
-
-      - name: Deploy to App Service
-        if: steps.gate.outputs.run == 'true'
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ steps.tf.outputs.app_name }}
-          package: ./backend
-          startup-command: 'npm start'
-
-      - name: Smoke Test (custom domain /health)
-        if: steps.gate.outputs.run == 'true'
-        run: |
-          for i in $(seq 1 20); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.tf.outputs.url }}/health" || true)
-            [ "$code" = "200" ] && { echo "healthy: ${{ steps.tf.outputs.url }}"; exit 0; }
-            echo "attempt $i: HTTP $code"; sleep 15
-          done
-          echo "::error::${{ steps.tf.outputs.url }}/health did not return 200"; exit 1
+  deploy-prod:
+    name: Prod
+    needs: approve-prod
+    if: always() && needs.approve-prod.result == 'success'
+    uses: ./.github/workflows/deploy-stage.yml
+    with:
+      stage: prod
+    secrets: inherit

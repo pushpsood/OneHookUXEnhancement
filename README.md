@@ -678,7 +678,8 @@ Terraform is configured to use the AzureRM remote backend named in `infra/main.t
 
 ```text
 OneHookUXEnhancement/
-├── .github/workflows/deploy.yml       # Tests, Terraform deployment, App Service deployment
+├── .github/workflows/deploy.yml       # Tests → gamma → manual approval → prod
+├── .github/workflows/deploy-stage.yml # Reusable per-stage Terraform + App Service deploy + smoke test
 ├── backend/
 │   ├── src/
 │   │   ├── index.ts                   # Express server and anonymous route
@@ -715,7 +716,9 @@ terraform apply -var-file=stages/<stage>.tfvars
 ```
 
 Locally, sign in with `az login`, export `ARM_SUBSCRIPTION_ID`, and add `-backend-config=use_oidc=false`
-to `init` (CI uses GitHub OIDC). The deploy workflow runs gamma, then prod.
+to `init` (CI uses GitHub OIDC). The deploy workflow runs gamma, then pauses for a manual approval
+(GitHub environment `prod-approval`, required reviewer) before deploying prod. Approve or reject it from
+the run page in GitHub Actions (**Review deployments**).
 
 DNS for both hostnames (CNAME to the Azure host plus the `asuid.` TXT ownership record) lives in Route53
 in the frontend AWS account and is owned by `OneHookClient/infra/stacks/chatbot-dns-stack.ts`
