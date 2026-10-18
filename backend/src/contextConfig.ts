@@ -1,3 +1,6 @@
+import type { SubscriptionTier } from 'onehook-api-client';
+import { parseSubscriptionTier } from 'onehook-api-client/membership';
+
 export interface ContextualFeatureConfig {
   enabled: boolean;
   ready: boolean;
@@ -26,7 +29,7 @@ export interface ContextualFeatureConfig {
   sessionStorageReady: boolean;
   sessionMissing: string[];
   sessionTierClaim: string;
-  sessionTierPolicies: Record<string, ChatSessionTierPolicy>;
+  sessionTierPolicies: Partial<Record<SubscriptionTier, ChatSessionTierPolicy>>;
   sessionMaxRetentionDays: number;
 }
 
@@ -37,43 +40,29 @@ export interface ChatSessionTierPolicy {
 }
 
 /**
- * Canonical tier key used for session-policy lookup.
+ * Canonical tier for session-policy lookup.
  *
- * The backend's subscription-tier WIRE values are frozen as `FREE`/`GOLD`/`PLATINUM` (see
- * `SubscriptionTier.java`), while the product/marketing DISPLAY names are `Must`/`Super`/`Infinity`
- * (the iOS membership page is the source of truth). A member's token may carry either form depending
- * on which attribute/claim populated it, so both the policy keys and the token claim are normalised
- * through this one function to a canonical lowercase wire value. That means a policy keyed `gold`,
- * `GOLD`, or `super` all resolve the same, and a claim of `GOLD`/`Super`/`super` all match it.
+ * Membership tiers are owned by the OneHook backend Smithy model (`club.onehook.common#SubscriptionTier`)
+ * and consumed ONLY from `onehook-api-client` — never re-declared here. The SDK parser accepts a tier
+ * (Must / Super / Infinity, any case) and returns its wire value; anything else is `undefined`.
+ * Both the policy keys and the token claim go through this one function.
  */
-export function normalizeTier(raw: string | undefined | null): string | undefined {
-  if (typeof raw !== 'string') return undefined;
-  const normalized = raw.trim().toUpperCase();
-  switch (normalized) {
-    case 'FREE':
-    case 'MUST':
-      return 'free';
-    case 'GOLD':
-    case 'SUPER':
-      return 'gold';
-    case 'PLATINUM':
-    case 'INFINITY':
-      return 'platinum';
-    default:
-      return undefined;
-  }
+export function normalizeTier(raw: unknown): SubscriptionTier | undefined {
+  return parseSubscriptionTier(raw);
 }
 
-function parseTierPolicies(raw: string | undefined, maxRetentionDays: number): Record<string, ChatSessionTierPolicy> {
+function parseTierPolicies(
+  raw: string | undefined,
+  maxRetentionDays: number,
+): Partial<Record<SubscriptionTier, ChatSessionTierPolicy>> {
   if (!raw) return {};
   try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    const policies: Record<string, ChatSessionTierPolicy> = {};
+    const policies: Partial<Record<SubscriptionTier, ChatSessionTierPolicy>> = {};
     for (const [rawTier, value] of Object.entries(parsed as Record<string, unknown>)) {
-      // Normalise the policy KEY to a canonical wire tier (free/gold/platinum). A key that is not a
-      // recognised tier (wire or Must/Super/Infinity alias) is ignored, so a stale `premium` key can
-      // never silently gate anything.
+      // Normalise the policy KEY to the SDK wire tier. A key that is not a recognised tier is
+      // ignored, so an unknown tier name can never silently gate anything.
       const tier = normalizeTier(rawTier);
       if (!tier
         || typeof value !== 'object'

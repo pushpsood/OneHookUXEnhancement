@@ -1,8 +1,11 @@
+import type { SubscriptionTier } from 'onehook-api-client';
+
 export type Mood = 'Happy' | 'Neutral' | 'Thinking' | 'Sad' | 'Excited';
 
 export interface AuthenticatedPrincipal {
   subject: string;
-  tier?: string;
+  /** Wire value from onehook-api-client, set only when the tier has a session policy. */
+  tier?: SubscriptionTier;
   permissions: Set<string>;
 }
 

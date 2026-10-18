@@ -1,3 +1,32 @@
+variable "stage" {
+  description = "Deployment stage (gamma | prod). Selects naming and the per-stage state key via stages/<stage>.*"
+  type        = string
+  default     = "gamma"
+
+  validation {
+    condition     = contains(["gamma", "prod"], var.stage)
+    error_message = "stage must be 'gamma' or 'prod'."
+  }
+}
+
+variable "custom_domain" {
+  description = "User-facing hostname for this stage, following the platform convention: chatbot.gamma.onehook.club (gamma) / chatbot.onehook.club (prod). Empty disables the binding."
+  type        = string
+  default     = ""
+}
+
+variable "custom_domain_enabled" {
+  description = "Bind custom_domain + issue its managed certificate. Keep false until the Route53 CNAME and asuid TXT records resolve publicly."
+  type        = bool
+  default     = false
+}
+
+variable "deployer_principal_id" {
+  description = "Object id of the deploying principal (GitHub Actions OIDC SP) granted blob access to the context storage. Empty = whoever runs terraform."
+  type        = string
+  default     = ""
+}
+
 variable "location" {
   description = "The Azure Region in which all resources in this example should be created."
   type        = string
@@ -176,7 +205,7 @@ variable "chat_session_storage_enabled" {
 }
 
 variable "auth_tier_claim" {
-  description = "Verified Cognito token claim containing the tier (canonical wire FREE/GOLD/PLATINUM or Must/Super/Infinity alias); use cognito:groups to resolve against groups"
+  description = "Verified Cognito token claim containing the membership tier (Must / Super / Infinity); use cognito:groups to resolve against groups"
   type        = string
   default     = "custom:subscriptionTier"
 }
@@ -193,7 +222,7 @@ variable "chat_session_max_retention_days" {
 }
 
 variable "chat_session_tier_policies" {
-  description = "Server-side Mr OneHook AI-session policies keyed by tier (canonical wire gold/platinum or the Super/Infinity aliases; normalized server-side). Must (FREE) is intentionally absent — the free tier does not get persisted AI sessions, per the membership matrix. Super (GOLD) and Infinity (PLATINUM) do."
+  description = "Server-side Mr OneHook AI-session policies keyed by membership tier (must / super / infinity, any case; normalized server-side via onehook-api-client). Must is intentionally absent — it does not get persisted AI sessions, per the membership matrix. Super and Infinity do."
   type = map(object({
     enabled        = bool
     max_sessions   = number
@@ -201,15 +230,15 @@ variable "chat_session_tier_policies" {
     retention_days = number
   }))
   default = {
-    # Super (GOLD): unlimited Mr OneHook AI per the membership matrix; persisted sessions enabled.
-    gold = {
+    # Super: unlimited Mr OneHook AI per the membership matrix; persisted sessions enabled.
+    super = {
       enabled        = true
       max_sessions   = 10
       max_messages   = 50
       retention_days = 30
     }
-    # Infinity (PLATINUM): up to 3 concurrent connections, so a higher session allowance.
-    platinum = {
+    # Infinity: up to 3 concurrent connections, so a higher session allowance.
+    infinity = {
       enabled        = true
       max_sessions   = 25
       max_messages   = 50

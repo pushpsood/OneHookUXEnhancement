@@ -16,8 +16,11 @@ terraform {
     resource_group_name  = "onehook-tfstate-rg"
     storage_account_name = "onehooktfstate4x"
     container_name       = "tfstate"
-    key                  = "terraform.tfstate"
-    use_oidc             = true
+    # `key` is supplied per stage at init time (partial configuration), so each stage has its own
+    # isolated state. gamma keeps the original key so its live resources are never re-created:
+    #   terraform init -backend-config=stages/gamma.backend.hcl   (key = terraform.tfstate)
+    #   terraform init -backend-config=stages/prod.backend.hcl    (key = prod.terraform.tfstate)
+    use_oidc = true
   }
 }
 
@@ -102,11 +105,18 @@ resource "azurerm_storage_management_policy" "session_retention" {
   }
 }
 
-# Grant the executing service principal (GitHub Action OIDC) contributor access
+locals {
+  # Pinned deployer principal (the GitHub Actions OIDC service principal) so a local operator run
+  # produces the same plan as CI instead of re-pointing this role at whoever ran terraform.
+  deployer_principal_id = coalesce(var.deployer_principal_id, data.azurerm_client_config.current.object_id)
+  custom_domain_enabled = var.custom_domain != "" && var.custom_domain_enabled
+}
+
+# Grant the deploying service principal (GitHub Action OIDC) contributor access
 resource "azurerm_role_assignment" "storage_contributor" {
   scope                = azurerm_storage_account.storage.id
   role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = data.azurerm_client_config.current.object_id
+  principal_id         = local.deployer_principal_id
 }
 
 # Azure OpenAI
@@ -151,6 +161,8 @@ resource "azurerm_linux_web_app" "app" {
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
   service_plan_id     = azurerm_service_plan.asp.id
+  # The user-facing custom domain is TLS-only; plain HTTP is redirected to HTTPS.
+  https_only = true
 
   identity {
     type = "SystemAssigned"
@@ -160,6 +172,9 @@ resource "azurerm_linux_web_app" "app" {
     application_stack {
       node_version = "20-lts"
     }
+    # Codified here because azure/webapps-deploy sets it; leaving it out makes every plan drift.
+    app_command_line                  = "npm start"
+    minimum_tls_version               = "1.2"
     health_check_path                 = "/health"
     health_check_eviction_time_in_min = 5
   }
@@ -223,4 +238,37 @@ resource "azurerm_role_assignment" "app_session_storage_contributor" {
   principal_id         = azurerm_linux_web_app.app.identity[0].principal_id
 
   depends_on = [azurerm_storage_container.session_container]
+}
+
+
+# ── User-facing custom domain (chatbot[.<stage>].onehook.club) ────────────────────────────────────
+# DNS lives in Route53 in the FRONTEND AWS account (OneHookClient infra/stacks/frontend-stack.ts):
+#   CNAME  <custom_domain>        -> <app>.azurewebsites.net
+#   TXT    asuid.<custom_domain>  -> custom_domain_verification_id (output below)
+# Those records must resolve BEFORE the binding is created, hence the custom_domain_enabled gate:
+# first apply with it false, deploy DNS, then flip it to true (same pattern as the backend's
+# customDomainsEnabled stage flag).
+resource "azurerm_app_service_custom_hostname_binding" "chatbot" {
+  count               = local.custom_domain_enabled ? 1 : 0
+  hostname            = var.custom_domain
+  app_service_name    = azurerm_linux_web_app.app.name
+  resource_group_name = azurerm_resource_group.rg.name
+
+  # ssl_state/thumbprint are owned by azurerm_app_service_certificate_binding below.
+  lifecycle {
+    ignore_changes = [ssl_state, thumbprint]
+  }
+}
+
+# Free App Service managed certificate (auto-renewed by Azure; requires Basic tier or above).
+resource "azurerm_app_service_managed_certificate" "chatbot" {
+  count                      = local.custom_domain_enabled ? 1 : 0
+  custom_hostname_binding_id = azurerm_app_service_custom_hostname_binding.chatbot[0].id
+}
+
+resource "azurerm_app_service_certificate_binding" "chatbot" {
+  count               = local.custom_domain_enabled ? 1 : 0
+  hostname_binding_id = azurerm_app_service_custom_hostname_binding.chatbot[0].id
+  certificate_id      = azurerm_app_service_managed_certificate.chatbot[0].id
+  ssl_state           = "SniEnabled"
 }

@@ -697,3 +697,32 @@ OneHookUXEnhancement/
 ├── setup-oidc.sh
 └── README.md
 ```
+
+
+## Stages and custom domains
+
+The Terraform in `infra/` deploys two fully isolated stages, each with its own state and variables:
+
+| Stage | URL | Azure app | State key |
+|-------|-----|-----------|-----------|
+| gamma | `https://chatbot.gamma.onehook.club` | `onehook-chatbot-api` (rg `onehook-chatbot-rg`) | `terraform.tfstate` |
+| prod  | `https://chatbot.onehook.club` | `onehook-chatbot-api-prod` (rg `onehook-chatbot-prod-rg`) | `prod.terraform.tfstate` |
+
+```sh
+cd infra
+terraform init -reconfigure -backend-config=stages/<stage>.backend.hcl
+terraform apply -var-file=stages/<stage>.tfvars
+```
+
+Locally, sign in with `az login`, export `ARM_SUBSCRIPTION_ID`, and add `-backend-config=use_oidc=false`
+to `init` (CI uses GitHub OIDC). The deploy workflow runs gamma, then prod.
+
+DNS for both hostnames (CNAME to the Azure host plus the `asuid.` TXT ownership record) lives in Route53
+in the frontend AWS account and is owned by `OneHookClient/infra/stacks/chatbot-dns-stack.ts`
+(`OneHook-ChatbotDns-prod`). On a new stage, deploy that DNS first, then set `custom_domain_enabled = true`.
+Azure issues and renews the managed TLS certificate.
+
+Prod runs with `contextual_ai_enabled = false` until the prod AWS backend (Cognito pool, AI-context API,
+cross-cloud role) exists: `/health` and the public product chat work, and member routes return 404, which
+clients show as "not configured". Fill the auth/data-API values in `stages/prod.tfvars` from the
+`OneHook-*-prod` outputs, then enable it.

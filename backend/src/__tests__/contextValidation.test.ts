@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { extractPermissions, resolveSessionTier } from '../auth';
-import { loadContextualFeatureConfig } from '../contextConfig';
+import { SubscriptionTier } from 'onehook-api-client';
+import { SUBSCRIPTION_TIERS, parseSubscriptionTier } from 'onehook-api-client/membership';
+import { loadContextualFeatureConfig, normalizeTier } from '../contextConfig';
 import { parseContextualChatInput } from '../contextTypes';
 
 test('contextual feature is disabled and not ready by default', () => {
@@ -125,19 +127,19 @@ test('session storage becomes ready only with a valid bounded tier policy', () =
   };
   const valid = loadContextualFeatureConfig({
     ...base,
-    // Keys may be canonical wire values OR Must/Super/Infinity aliases — both normalize to the
-    // canonical lowercase wire tier. Super (GOLD) + Infinity (PLATINUM) get AI sessions; Must (FREE)
+    // Keys may be SDK wire values OR display names — both normalize to the onehook-api-client
+    // SubscriptionTier wire value. Super + Infinity get AI sessions; Must
     // is disabled, matching the membership matrix.
     CHAT_SESSION_TIER_POLICIES: JSON.stringify({
       Super: { enabled: true, maxSessions: 10, maxMessages: 50, retentionDays: 30 },
-      PLATINUM: { enabled: true, maxSessions: 25, maxMessages: 50, retentionDays: 30 },
+      INFINITY: { enabled: true, maxSessions: 25, maxMessages: 50, retentionDays: 30 },
       Must: { enabled: false, maxSessions: 1, maxMessages: 2, retentionDays: 1 },
     }),
   });
   assert.equal(valid.sessionStorageReady, true);
   assert.deepEqual(valid.sessionTierPolicies, {
-    gold: { maxSessions: 10, maxMessages: 50, retentionDays: 30 },
-    platinum: { maxSessions: 25, maxMessages: 50, retentionDays: 30 },
+    [SubscriptionTier.SUPER]: { maxSessions: 10, maxMessages: 50, retentionDays: 30 },
+    [SubscriptionTier.INFINITY]: { maxSessions: 25, maxMessages: 50, retentionDays: 30 },
   });
 
   const invalid = loadContextualFeatureConfig({
@@ -160,26 +162,47 @@ test('session storage becomes ready only with a valid bounded tier policy', () =
   assert.equal(stale.sessionStorageReady, false);
 });
 
-test('tier resolution maps wire values AND Must/Super/Infinity aliases to the canonical policy key', () => {
-  // Policies keyed by canonical wire tiers (what the Terraform default produces).
-  const tiers = { gold: {}, platinum: {} };
-  // The real Cognito attribute carries the WIRE value.
-  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'GOLD' }, 'custom:subscriptionTier', tiers), 'gold');
-  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'PLATINUM' }, 'custom:subscriptionTier', tiers), 'platinum');
-  // A token (or stale client) carrying the display alias still resolves.
-  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': ' Super ' }, 'custom:subscriptionTier', tiers), 'gold');
-  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'Infinity' }, 'custom:subscriptionTier', tiers), 'platinum');
-  // Must (FREE) has no persisted-session policy → undefined (not eligible).
-  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'FREE' }, 'custom:subscriptionTier', tiers), undefined);
-  assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'Must' }, 'custom:subscriptionTier', tiers), undefined);
+test('tier resolution maps SDK wire values and display names to the SubscriptionTier policy key', () => {
+  // Policies keyed by SDK wire tiers (what the Terraform default `super`/`infinity` normalizes to).
+  const tiers = { [SubscriptionTier.SUPER]: {}, [SubscriptionTier.INFINITY]: {} };
+  const claim = 'custom:subscriptionTier';
+  for (const info of SUBSCRIPTION_TIERS) {
+    const expected = info.wire in tiers ? info.wire : undefined;
+    // The real Cognito attribute carries the WIRE value; a stale client may carry the display name.
+    assert.equal(resolveSessionTier({ [claim]: info.wire }, claim, tiers), expected, info.wire);
+    assert.equal(resolveSessionTier({ [claim]: ` ${info.displayName.toLowerCase()} ` }, claim, tiers), expected, info.displayName);
+  }
 });
 
-test('Cognito tier resolution supports custom claims and configured groups only', () => {
-  const tiers = { plus: {}, premium: {} };
-  assert.equal(resolveSessionTier({ 'custom:tier': ' Premium ' }, 'custom:tier', tiers), 'premium');
-  assert.equal(resolveSessionTier({ 'cognito:groups': ['staff', 'plus'] }, 'cognito:groups', tiers), 'plus');
-  assert.equal(resolveSessionTier({ 'custom:tier': 'free' }, 'custom:tier', tiers), undefined);
-  assert.equal(resolveSessionTier({ 'custom:tier': { value: 'premium' } }, 'custom:tier', tiers), undefined);
+test('unknown tier names never resolve, whatever the claim shape', () => {
+  const tiers = { [SubscriptionTier.SUPER]: {}, [SubscriptionTier.INFINITY]: {} };
+  for (const unknown of ['NOT_A_TIER', 'staff']) {
+    assert.equal(resolveSessionTier({ 'custom:tier': unknown }, 'custom:tier', tiers), undefined, unknown);
+  }
+  assert.equal(resolveSessionTier({ 'cognito:groups': ['staff', 'SUPER'] }, 'cognito:groups', tiers), SubscriptionTier.SUPER);
+  assert.equal(resolveSessionTier({ 'custom:tier': { value: 'SUPER' } }, 'custom:tier', tiers), undefined);
+});
+
+test('an unknown single tier claim is treated as Must and logged as an error', () => {
+  const tiers = { [SubscriptionTier.SUPER]: {}, [SubscriptionTier.INFINITY]: {} };
+  const original = console.error;
+  const logged: unknown[] = [];
+  console.error = (e: unknown) => { logged.push(e); };
+  try {
+    assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'NOT_A_TIER' }, 'custom:subscriptionTier', tiers), undefined);
+    assert.equal(resolveSessionTier({}, 'custom:subscriptionTier', tiers), undefined); // missing: silent
+    assert.equal(resolveSessionTier({ 'cognito:groups': ['staff'] }, 'cognito:groups', tiers), undefined); // groups: silent
+  } finally {
+    console.error = original;
+  }
+  assert.equal(logged.length, 1);
+  assert.match(String(logged[0]), /UnknownSubscriptionTier: token tier 'NOT_A_TIER' treated as Must/);
+});
+
+test('normalizeTier is exactly the onehook-api-client parser', () => {
+  for (const raw of ['SUPER', 'super', ' Infinity ', 'must', 'NOT_A_TIER', '', undefined, 42]) {
+    assert.equal(normalizeTier(raw), parseSubscriptionTier(raw));
+  }
 });
 
 test('session persistence is explicit and session IDs must be UUIDs', () => {
