@@ -117,15 +117,21 @@ if (contextualConfig.ready && blobServiceClient) {
     dataApiSigner,
     contextualConfig.dataApiTimeoutMs,
   );
-  if (!contextualConfig.oneHookApiUrl) {
-    console.warn('[WARN] ONEHOOK_API_URL is not set; OneHook suggestions will not be recorded');
+  // Suggestions go to Matching's IAM-only route, so they need the SigV4 signer (federated AWS role).
+  const suggestionsEnabled = Boolean(contextualConfig.oneHookMatchingApiUrl)
+    && contextualConfig.oneHookDataApiAuthMode === 'sigv4';
+  if (!suggestionsEnabled) {
+    console.warn('[WARN] OneHook suggestions are off (needs ONEHOOK_MATCHING_API_URL and sigv4 auth mode)');
   }
   app.use(createContextualRouter(contextualConfig, {
     client,
     deployment,
     dataClient,
-    ...(contextualConfig.oneHookApiUrl
-      ? { suggestionRecorder: new MatchingSuggestionClient(contextualConfig.oneHookApiUrl, contextualConfig.dataApiTimeoutMs) }
+    ...(suggestionsEnabled
+      ? {
+          suggestionRecorder: new MatchingSuggestionClient(
+            contextualConfig.oneHookMatchingApiUrl, dataApiSigner, contextualConfig.dataApiTimeoutMs),
+        }
       : {}),
     sessionStore,
     productContextProvider: fetchGitHubContext,

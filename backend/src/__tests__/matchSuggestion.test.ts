@@ -35,23 +35,48 @@ test('prompt instructs the model to emit matchSuggestion only on explicit reques
   assert.match(prompt, /never physical traits, race, religion/);
 });
 
-test('client posts the suggestion with the member token and maps outcomes', async () => {
+test('client signs the call with the service identity, names only the member id, and maps outcomes', async () => {
   const calls: Array<{ url: string; init: RequestInit }> = [];
-  const respond = (status: number) => (async (url: string, init: RequestInit) => {
+  const signed: Array<{ method: string; url: URL; body?: string }> = [];
+  const signer = {
+    sign: async (r: { method: string; url: URL; headers: Record<string, string>; body?: string }) => {
+      signed.push(r);
+      return { ...r.headers, authorization: 'AWS4-HMAC-SHA256 Credential=test' };
+    },
+  };
+  const respond = (status: number, body: unknown = {}) => (async (url: string, init: RequestInit) => {
     calls.push({ url, init });
-    return new Response('{}', { status });
+    return new Response(JSON.stringify(body), { status });
   }) as unknown as typeof fetch;
+  const base = 'https://abc.execute-api.ap-south-1.amazonaws.com/gamma';
+  const suggestion = { prompt: 'someone kind', reasoning: 'why' };
 
-  const ok = new MatchingSuggestionClient('https://api.gamma.onehook.club', 1000, respond(201));
-  assert.equal(await ok.record('member-token', { prompt: 'someone kind', reasoning: 'why' }), 'RECORDED');
-  assert.equal(calls[0]!.url, 'https://api.gamma.onehook.club/matching/suggestions');
-  assert.equal(calls[0]!.init.method, 'POST');
-  assert.equal((calls[0]!.init.headers as Record<string, string>).authorization, 'Bearer member-token');
-  assert.deepEqual(JSON.parse(String(calls[0]!.init.body)), { prompt: 'someone kind', reasoning: 'why' });
+  const ok = new MatchingSuggestionClient(base, signer, 1000, respond(201));
+  assert.equal(await ok.record('member-1', suggestion), 'RECORDED');
+  assert.equal(calls[0]!.url, `${base}/matching/internal/users/member-1/suggestions`);
+  assert.equal((calls[0]!.init.headers as Record<string, string>).authorization, 'AWS4-HMAC-SHA256 Credential=test');
+  assert.equal(signed[0]!.method, 'POST');
+  assert.equal(signed[0]!.body, calls[0]!.init.body, 'the signed payload is exactly the sent payload');
+  assert.deepEqual(JSON.parse(String(calls[0]!.init.body)), suggestion);
 
-  assert.equal(await new MatchingSuggestionClient('u', 1000, respond(403)).record('t', { prompt: 'abc', reasoning: 'r' }), 'PREMIUM_REQUIRED');
-  assert.equal(await new MatchingSuggestionClient('u', 1000, respond(503)).record('t', { prompt: 'abc', reasoning: 'r' }), 'UNAVAILABLE');
-  const throwing = (async () => { throw new Error('network'); }) as unknown as typeof fetch;
-  assert.equal(await new MatchingSuggestionClient('u', 1000, throwing).record('t', { prompt: 'abc', reasoning: 'r' }), 'UNAVAILABLE');
-  assert.equal(await disabledSuggestionRecorder.record('t', { prompt: 'abc', reasoning: 'r' }), 'UNAVAILABLE');
+  assert.equal(await new MatchingSuggestionClient(base, signer, 1000, respond(403, { error: 'PREMIUM_REQUIRED' }))
+    .record('m', suggestion), 'PREMIUM_REQUIRED');
+  assert.equal(await new MatchingSuggestionClient(base, signer, 1000, respond(403, { message: 'not authorized' }))
+    .record('m', suggestion), 'UNAVAILABLE', 'an IAM denial is not a tier problem');
+  assert.equal(await new MatchingSuggestionClient(base, signer, 1000, respond(503)).record('m', suggestion), 'UNAVAILABLE');
+  const failingSigner = { sign: async () => { throw new Error('no AWS credentials'); } };
+  assert.equal(await new MatchingSuggestionClient(base, failingSigner, 1000, respond(201)).record('m', suggestion), 'UNAVAILABLE');
+  assert.equal(await disabledSuggestionRecorder.record('m', suggestion), 'UNAVAILABLE');
+});
+
+test('SigV4 signer signs the POST body hash', async () => {
+  const { SigV4RequestSigner } = await import('../sigv4Signer');
+  const creds = async () => ({ accessKeyId: 'AKIDEXAMPLE', secretAccessKey: 'secret' });
+  const signer = new SigV4RequestSigner('ap-south-1', 'execute-api', creds);
+  const url = new URL('https://abc.execute-api.ap-south-1.amazonaws.com/gamma/matching/internal/users/u/suggestions');
+  const a = await signer.sign({ method: 'POST', url, headers: { 'content-type': 'application/json' }, body: '{"a":1}' });
+  const b = await signer.sign({ method: 'POST', url, headers: { 'content-type': 'application/json' }, body: '{"a":2}' });
+  assert.match(a.authorization ?? '', /^AWS4-HMAC-SHA256 /);
+  assert.notEqual(a['x-amz-content-sha256'] ?? a.authorization, b['x-amz-content-sha256'] ?? b.authorization,
+    'different bodies produce different signatures');
 });

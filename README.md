@@ -210,15 +210,23 @@ Match-to-match messages never enter this lifecycle. They stay in the app's end-t
 
 When a member asks Mr OneHook to find a kind of person, the model adds an optional `matchSuggestion`
 (`prompt`: a third-person description of who they want, with no physical or sensitive traits;
-`reasoning`: one sentence for the member). The backend posts it to the OneHook Matching service,
-`POST {ONEHOOK_API_URL}/matching/suggestions`, with the member's own Cognito token. Matching embeds it
-and mixes people who fit it into the member's discover feed as "Mr. OneHook" cards that carry the
-reasoning.
+`reasoning`: one sentence for the member). The backend records it in the OneHook Matching service with
+`POST {ONEHOOK_MATCHING_API_URL}/matching/internal/users/{userId}/suggestions`, an AWS_IAM route,
+SigV4-signed with the same federated AWS role used for the AI-context route
+(`OneHook-UX-AiContext-<stage>`, allowed to invoke only those two routes). `userId` is the subject of
+the member token this service verified; the token itself is never forwarded. Matching enforces the
+Super+ tier from its own database and mixes people who fit the suggestion into the member's discover
+feed as "Mr. OneHook" cards carrying the reasoning.
+
+Suggestions are recorded **only from product chats** (no `matchId`). In a connection chat the model
+also sees the other person's messages, which must never be able to plant suggestions in this
+member's feed.
 
 The chat response then includes `matchSuggestion: { status, reasoning }`, where `status` is
-`RECORDED`, `PREMIUM_REQUIRED` (Super and above only) or `UNAVAILABLE`. The prompt itself is never
-returned, logged or stored here. `ONEHOOK_API_URL` (Terraform `onehook_api_url`) is the gamma API in
-gamma and empty in prod until the prod backend API is live; empty means nothing is recorded.
+`RECORDED`, `PREMIUM_REQUIRED` (Super and above only) or `UNAVAILABLE`. The prompt is never returned,
+logged or stored here. `ONEHOOK_MATCHING_API_URL` (Terraform `onehook_matching_api_url`) must be the
+execute-api invoke URL including stage (SigV4 signs Host, so not the CloudFront ingress); empty, or a
+non-`sigv4` data-API auth mode, disables recording.
 
 ## Local Development
 

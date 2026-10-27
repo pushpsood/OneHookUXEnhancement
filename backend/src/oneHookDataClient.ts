@@ -30,6 +30,8 @@ export interface RequestSigner {
     method: string;
     url: URL;
     headers: Record<string, string>;
+    /** Exact request body; SigV4 signs its hash, so it must be the bytes that are sent. */
+    body?: string;
   }): Promise<Record<string, string>>;
 }
 

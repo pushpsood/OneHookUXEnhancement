@@ -16,8 +16,8 @@ import type { RequestSigner } from './oneHookDataClient';
  * keys on the App Service). The IAM principal those credentials resolve to must be granted
  * {@code execute-api:Invoke} on the ai-context route.</p>
  *
- * <p>Signing is per-request and includes the body hash; this endpoint is a bodyless GET, so the
- * empty-payload hash is used. The signer adds {@code Authorization}, {@code X-Amz-Date}, and (for
+ * <p>Signing is per-request and includes the body hash (empty for bodyless GETs; the exact JSON for
+ * POSTs such as the suggestion route). The signer adds {@code Authorization}, {@code X-Amz-Date}, and (for
  * temporary credentials) {@code X-Amz-Security-Token}. {@code X-OneHook-User-Id} is part of the
  * signed header set, so it cannot be tampered with in transit.</p>
  */
@@ -41,6 +41,7 @@ export class SigV4RequestSigner implements RequestSigner {
     method: string;
     url: URL;
     headers: Record<string, string>;
+    body?: string;
   }): Promise<Record<string, string>> {
     // API Gateway requires the Host header in the signed set; SignatureV4 derives it from hostname.
     const httpRequest = new HttpRequest({
@@ -54,6 +55,8 @@ export class SigV4RequestSigner implements RequestSigner {
         ...request.headers,
         host: request.url.host,
       },
+      // The payload hash is part of the signature; API Gateway recomputes it from the actual body.
+      ...(request.body !== undefined ? { body: request.body } : {}),
     });
 
     const signed = await this.signer.sign(httpRequest);

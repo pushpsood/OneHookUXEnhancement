@@ -31,5 +31,5 @@ onehook_data_api_scope                     = "https://api.onehook.club/.default"
 onehook_data_api_aws_role_arn              = ""
 onehook_data_api_aws_web_identity_audience = ""
 
-# Empty until the prod backend API (api.onehook.club) is live; suggestions are not recorded meanwhile.
-onehook_api_url = ""
+# Empty until prod Matching is deployed and the prod AI-context role may invoke its suggestion route.
+onehook_matching_api_url = ""

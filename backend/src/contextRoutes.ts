@@ -203,13 +203,14 @@ export function createContextualRouter(
             })
           : undefined;
         // "OneHook, find me ...": record the suggestion in Matching so matching people appear in the
-        // member's discover feed. The prompt stays server-side; the client only learns the outcome
-        // and the reasoning that will be shown on the cards.
+        // member's discover feed. Only from product chats: in a connection chat the model also sees the
+        // other person's messages, which must never be able to plant suggestions in this member's feed.
+        // The call is signed with this service's AWS role and names only the verified subject; the
+        // member's token is never forwarded. The prompt stays server-side.
         let matchSuggestion: { status: SuggestionStatus; reasoning: string } | undefined;
-        if (result.matchSuggestion) {
-          const bearer = (req.headers.authorization ?? '').slice('Bearer '.length);
+        if (result.matchSuggestion && !input.matchId) {
           const status = await (services.suggestionRecorder ?? disabledSuggestionRecorder)
-            .record(bearer, result.matchSuggestion);
+            .record(subject, result.matchSuggestion);
           matchSuggestion = { status, reasoning: result.matchSuggestion.reasoning };
           console.info('OneHook suggestion', { requestId, status });
         }
