@@ -1,14 +1,14 @@
+import type { RequestSigner } from './oneHookDataClient';
+
 /**
- * Records a OneHook suggestion in the OneHook Matching service (AWS) on the member's behalf.
+ * Records a OneHook suggestion in the OneHook Matching service (AWS) on a member's behalf.
  *
  * When a member asks Mr OneHook to find someone, the model returns a `matchSuggestion` (its analysis of
- * who the member is looking for, plus a short user-facing reasoning). This client sends it to
- * `POST {ONEHOOK_API_URL}/matching/suggestions`. Matching embeds the prompt and, from then on, mixes
- * people who fit it into the member's discover feed as "Mr. OneHook" cards carrying the reasoning.
- * Nothing about candidates comes back here.
- *
- * The call carries the member's own Cognito token (the same one this service just verified), so Matching
- * applies its normal per-member checks, including the Super+ tier gate. The prompt is never logged.
+ * who the member is looking for, plus a short user-facing reasoning). This client sends it to Matching's
+ * IAM-only route `POST {ONEHOOK_MATCHING_API_URL}/matching/internal/users/{userId}/suggestions`, SigV4-signed
+ * with this service's federated AWS role (the same identity used for the AI-context route). The member's
+ * own token is never forwarded: this service verified it, and passes only the verified subject.
+ * Matching still enforces the Super+ tier from its own database. The prompt is never logged.
  */
 
 export type SuggestionStatus = 'RECORDED' | 'PREMIUM_REQUIRED' | 'UNAVAILABLE';
@@ -19,7 +19,7 @@ export interface MatchSuggestion {
 }
 
 export interface SuggestionRecorder {
-  record(memberBearerToken: string, suggestion: MatchSuggestion): Promise<SuggestionStatus>;
+  record(userId: string, suggestion: MatchSuggestion): Promise<SuggestionStatus>;
 }
 
 export const SUGGESTION_PROMPT_MIN = 3;
@@ -46,36 +46,43 @@ export function sanitizeMatchSuggestion(value: unknown): MatchSuggestion | null 
 export class MatchingSuggestionClient implements SuggestionRecorder {
   constructor(
     private readonly baseUrl: string,
+    private readonly signer: RequestSigner,
     private readonly timeoutMs: number,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async record(memberBearerToken: string, suggestion: MatchSuggestion): Promise<SuggestionStatus> {
+  async record(userId: string, suggestion: MatchSuggestion): Promise<SuggestionStatus> {
+    const url = new URL(`${this.baseUrl}/matching/internal/users/${encodeURIComponent(userId)}/suggestions`);
+    const body = JSON.stringify(suggestion);
     let response: Response;
     try {
-      response = await this.fetchImpl(`${this.baseUrl}/matching/suggestions`, {
+      const headers = await this.signer.sign({
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json',
-          authorization: `Bearer ${memberBearerToken}`,
-        },
-        body: JSON.stringify(suggestion),
+        url,
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body,
+      });
+      response = await this.fetchImpl(url.toString(), {
+        method: 'POST',
+        headers,
+        body,
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch {
+      // Signing (no AWS credentials) or network failure: nothing recorded.
       return 'UNAVAILABLE';
     }
     if (response.status === 200 || response.status === 201) return 'RECORDED';
     if (response.status === 403) {
-      // PREMIUM_REQUIRED is the only 403 Matching returns for this route.
-      return 'PREMIUM_REQUIRED';
+      // 403 is either PREMIUM_REQUIRED (tier gate) or an IAM denial; only the former carries that code.
+      const code = await response.json().then((b: unknown) => (b as { error?: unknown })?.error).catch(() => undefined);
+      return code === 'PREMIUM_REQUIRED' ? 'PREMIUM_REQUIRED' : 'UNAVAILABLE';
     }
     return 'UNAVAILABLE';
   }
 }
 
-/** Used when ONEHOOK_API_URL is not configured: nothing is recorded. */
+/** Used when ONEHOOK_MATCHING_API_URL is not configured: nothing is recorded. */
 export const disabledSuggestionRecorder: SuggestionRecorder = {
   record: async () => 'UNAVAILABLE',
 };

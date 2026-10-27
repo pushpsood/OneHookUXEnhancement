@@ -130,8 +130,8 @@ variable "onehook_data_api_url" {
   default     = "https://n74oye7v0i.execute-api.ap-south-1.amazonaws.com/prod"
 }
 
-variable "onehook_api_url" {
-  description = "Public, Cognito-authorized OneHook API base URL (e.g. https://api.gamma.onehook.club). Mr OneHook records a member's \"find me ...\" suggestion with POST {url}/matching/suggestions using the member's own token. Empty disables recording."
+variable "onehook_matching_api_url" {
+  description = "OneHook Matching execute-api invoke URL including stage (e.g. https://abc.execute-api.ap-south-1.amazonaws.com/gamma). Mr OneHook records a member's \"find me ...\" suggestion with a SigV4-signed POST {url}/matching/internal/users/{userId}/suggestions using its federated AWS role. Must be the execute-api host, not the CloudFront ingress (SigV4 signs Host). Empty disables recording."
   type        = string
   default     = ""
 }
