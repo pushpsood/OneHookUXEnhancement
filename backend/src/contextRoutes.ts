@@ -14,6 +14,7 @@ import {
   type ContextualModelResponse,
 } from './contextPrompt';
 import { parseContextualChatInput } from './contextTypes';
+import { disabledSuggestionRecorder, type SuggestionRecorder, type SuggestionStatus } from './matchingSuggestionClient';
 import {
   MatchContextAccessError,
   MatchContextUnavailableError,
@@ -22,6 +23,8 @@ import {
 
 interface ContextualServices {
   client: AzureOpenAI;
+  /** Records OneHook suggestions in Matching (AWS) with the member's token. */
+  suggestionRecorder?: SuggestionRecorder;
   deployment: string;
   dataClient: OneHookDataClient;
   sessionStore: PlaintextChatSessionStore;
@@ -199,11 +202,24 @@ export function createContextualRouter(
               policy: sessionPolicy,
             })
           : undefined;
-        const responseResult = result.needsMoreContext && result.contextRequest
-          ? { ...result, contextRequest: { ...result.contextRequest, requestId } }
-          : result;
+        // "OneHook, find me ...": record the suggestion in Matching so matching people appear in the
+        // member's discover feed. The prompt stays server-side; the client only learns the outcome
+        // and the reasoning that will be shown on the cards.
+        let matchSuggestion: { status: SuggestionStatus; reasoning: string } | undefined;
+        if (result.matchSuggestion) {
+          const bearer = (req.headers.authorization ?? '').slice('Bearer '.length);
+          const status = await (services.suggestionRecorder ?? disabledSuggestionRecorder)
+            .record(bearer, result.matchSuggestion);
+          matchSuggestion = { status, reasoning: result.matchSuggestion.reasoning };
+          console.info('OneHook suggestion', { requestId, status });
+        }
+        const { matchSuggestion: _internal, ...publicResult } = result;
+        const responseResult = publicResult.needsMoreContext && publicResult.contextRequest
+          ? { ...publicResult, contextRequest: { ...publicResult.contextRequest, requestId } }
+          : publicResult;
         res.json({
           ...responseResult,
+          ...(matchSuggestion ? { matchSuggestion } : {}),
           contextUsed,
           requestId,
           ...(storedSession

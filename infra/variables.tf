@@ -130,6 +130,12 @@ variable "onehook_data_api_url" {
   default     = "https://n74oye7v0i.execute-api.ap-south-1.amazonaws.com/prod"
 }
 
+variable "onehook_api_url" {
+  description = "Public, Cognito-authorized OneHook API base URL (e.g. https://api.gamma.onehook.club). Mr OneHook records a member's \"find me ...\" suggestion with POST {url}/matching/suggestions using the member's own token. Empty disables recording."
+  type        = string
+  default     = ""
+}
+
 variable "onehook_data_api_scope" {
   description = "Managed-identity OAuth scope for the authoritative OneHook data API (bearer auth mode only)"
   type        = string

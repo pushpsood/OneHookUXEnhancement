@@ -12,6 +12,8 @@ export interface ContextualFeatureConfig {
   corsAllowedOrigins: string[];
   userChatPermission: string;
   oneHookDataApiUrl: string;
+  /** Public OneHook API (Cognito-authorized), e.g. https://api.gamma.onehook.club. Empty = suggestions off. */
+  oneHookApiUrl: string;
   oneHookDataApiScope: string;
   oneHookDataApiAuthMode: 'sigv4' | 'bearer';
   oneHookDataApiAwsRegion: string;
@@ -120,6 +122,7 @@ export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env
     authJwksUri: env.AUTH_JWKS_URI?.trim() ?? '',
     corsAllowedOrigins: (env.CORS_ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean),
     oneHookDataApiUrl: env.ONEHOOK_DATA_API_URL?.trim().replace(/\/$/, '') ?? '',
+    oneHookApiUrl: env.ONEHOOK_API_URL?.trim().replace(/\/$/, '') ?? '',
     oneHookDataApiScope: env.ONEHOOK_DATA_API_SCOPE?.trim() ?? '',
     oneHookDataApiAuthMode: authMode,
     oneHookDataApiAwsRegion: awsRegion,

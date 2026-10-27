@@ -206,6 +206,20 @@ Match-to-match messages never enter this lifecycle. They stay in the app's end-t
 
 ---
 
+## Mr OneHook "find me ..." suggestions
+
+When a member asks Mr OneHook to find a kind of person, the model adds an optional `matchSuggestion`
+(`prompt`: a third-person description of who they want, with no physical or sensitive traits;
+`reasoning`: one sentence for the member). The backend posts it to the OneHook Matching service,
+`POST {ONEHOOK_API_URL}/matching/suggestions`, with the member's own Cognito token. Matching embeds it
+and mixes people who fit it into the member's discover feed as "Mr. OneHook" cards that carry the
+reasoning.
+
+The chat response then includes `matchSuggestion: { status, reasoning }`, where `status` is
+`RECORDED`, `PREMIUM_REQUIRED` (Super and above only) or `UNAVAILABLE`. The prompt itself is never
+returned, logged or stored here. `ONEHOOK_API_URL` (Terraform `onehook_api_url`) is the gamma API in
+gamma and empty in prod until the prod backend API is live; empty means nothing is recorded.
+
 ## Local Development
 
 ### Prerequisites
