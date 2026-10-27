@@ -8,6 +8,7 @@ import { loadContextualFeatureConfig } from './contextConfig';
 import { createContextualRouter } from './contextRoutes';
 import { PlaintextChatSessionStore } from './plaintextChatSessionStore';
 import { OneHookDataClient, BearerTokenSigner, type RequestSigner } from './oneHookDataClient';
+import { MatchingSuggestionClient } from './matchingSuggestionClient';
 import { SigV4RequestSigner } from './sigv4Signer';
 import { createAzureWebIdentityCredentialProvider } from './azureAwsCredentials';
 import { parseContextualModelResponse } from './contextPrompt';
@@ -116,10 +117,16 @@ if (contextualConfig.ready && blobServiceClient) {
     dataApiSigner,
     contextualConfig.dataApiTimeoutMs,
   );
+  if (!contextualConfig.oneHookApiUrl) {
+    console.warn('[WARN] ONEHOOK_API_URL is not set; OneHook suggestions will not be recorded');
+  }
   app.use(createContextualRouter(contextualConfig, {
     client,
     deployment,
     dataClient,
+    ...(contextualConfig.oneHookApiUrl
+      ? { suggestionRecorder: new MatchingSuggestionClient(contextualConfig.oneHookApiUrl, contextualConfig.dataApiTimeoutMs) }
+      : {}),
     sessionStore,
     productContextProvider: fetchGitHubContext,
   }));

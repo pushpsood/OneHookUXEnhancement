@@ -6,6 +6,7 @@ import type {
   Mood,
 } from './contextTypes';
 import type { ChatSessionMessage } from './plaintextChatSessionStore';
+import { sanitizeMatchSuggestion, type MatchSuggestion } from './matchingSuggestionClient';
 
 const ALLOWED_MOODS = new Set<Mood>(['Happy', 'Neutral', 'Thinking', 'Sad', 'Excited']);
 
@@ -68,7 +69,8 @@ Return strictly valid JSON with:
 - "reply": a concise helpful string
 - "mood": one of "Happy", "Neutral", "Thinking", "Sad", "Excited"
 - "needsMoreContext": true only when a local message search is required
-- when needsMoreContext is true, "contextRequest" with 1-8 short searchTerms, optional ISO dateRange, and maxMessages no greater than ${contextRequestMaxMessages}`,
+- when needsMoreContext is true, "contextRequest" with 1-8 short searchTerms, optional ISO dateRange, and maxMessages no greater than ${contextRequestMaxMessages}
+- "matchSuggestion": include ONLY when the member explicitly asks OneHook to find, suggest, or look for a kind of person. Then give {"prompt": a 1-3 sentence third-person description of the person they are looking for, covering personality, interests, lifestyle and relationship intent they stated (never physical traits, race, religion, caste, politics, health, or any protected or sensitive attribute, and never a specific named person), "reasoning": one short sentence addressed to the member explaining why these people will be suggested, e.g. "You asked for someone outdoorsy who loves books"}. OneHook uses it to add matching people to the member's Discover feed; say so briefly in "reply". Omit matchSuggestion for every other message.`,
     contextUsed: {
       profile: profileEnabled,
       match: Boolean(match),
@@ -85,6 +87,8 @@ export interface ContextualModelResponse {
   mood: Mood;
   needsMoreContext?: true;
   contextRequest?: AdditionalContextRequest;
+  /** Present when the member asked OneHook to find someone. Never returned to the client verbatim. */
+  matchSuggestion?: MatchSuggestion;
 }
 
 export function parseContextualModelResponse(
@@ -106,6 +110,9 @@ export function parseContextualModelResponse(
     reply: record.reply.trim(),
     mood: record.mood as Mood,
   };
+  // An unusable suggestion is dropped, never fatal: the reply is still valid.
+  const suggestion = record.needsMoreContext === true ? null : sanitizeMatchSuggestion(record.matchSuggestion);
+  if (suggestion) response.matchSuggestion = suggestion;
   if (record.needsMoreContext !== true) return response;
   if (typeof record.contextRequest !== 'object'
     || record.contextRequest === null

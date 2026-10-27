@@ -30,3 +30,6 @@ onehook_data_api_url                       = ""
 onehook_data_api_scope                     = "https://api.onehook.club/.default"
 onehook_data_api_aws_role_arn              = ""
 onehook_data_api_aws_web_identity_audience = ""
+
+# Empty until the prod backend API (api.onehook.club) is live; suggestions are not recorded meanwhile.
+onehook_api_url = ""
