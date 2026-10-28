@@ -205,12 +205,15 @@ export function createContextualRouter(
         // "OneHook, find me ...": record the suggestion in Matching so matching people appear in the
         // member's discover feed. Only from product chats: in a connection chat the model also sees the
         // other person's messages, which must never be able to plant suggestions in this member's feed.
-        // The call is signed with this service's AWS role and names only the verified subject; the
-        // member's token is never forwarded. The prompt stays server-side.
+        // The call is signed with this service's AWS role and carries the member's token as proof; the
+        // member id and tier come only from that token. The prompt stays server-side.
         let matchSuggestion: { status: SuggestionStatus; reasoning: string } | undefined;
         if (result.matchSuggestion && !input.matchId) {
+          // The member's own token (already verified above) is sent as PROOF of their session; Matching
+          // re-verifies it and derives the member id and tier only from it.
+          const memberIdToken = (req.headers.authorization ?? '').slice('Bearer '.length).trim();
           const status = await (services.suggestionRecorder ?? disabledSuggestionRecorder)
-            .record(subject, result.matchSuggestion);
+            .record(memberIdToken, result.matchSuggestion);
           matchSuggestion = { status, reasoning: result.matchSuggestion.reasoning };
           console.info('OneHook suggestion', { requestId, status });
         }

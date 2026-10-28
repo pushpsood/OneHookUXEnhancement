@@ -39,3 +39,12 @@ output "custom_domain" {
 output "chatbot_url" {
   value = local.custom_domain_enabled ? "https://${var.custom_domain}" : "https://${azurerm_linux_web_app.app.default_hostname}"
 }
+
+# Values OneHookBackend infra/config/mr-onehook.ts needs for the AWS role trust (none are secrets).
+output "aws_federation" {
+  value = {
+    tenant_id                     = data.azurerm_client_config.current.tenant_id
+    audience                      = local.aws_web_identity_audience
+    managed_identity_principal_id = azurerm_linux_web_app.app.identity[0].principal_id
+  }
+}

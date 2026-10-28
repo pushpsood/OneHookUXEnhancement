@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    azuread = {
+      source  = "hashicorp/azuread"
+      version = "~> 3.0"
+    }
   }
 
   backend "azurerm" {
@@ -27,6 +31,43 @@ terraform {
 provider "azurerm" {
   features {}
   storage_use_azuread = true
+}
+
+provider "azuread" {}
+
+# ── AWS federation (Mr OneHook -> OneHook AWS) ─────────────────────────────────
+# The App Service's managed identity requests an Entra token for THIS app registration's identifier URI
+# and exchanges it in AWS (IAM OIDC provider + OneHook-MrOneHook-<stage>-Role, both in OneHookBackend CDK)
+# for short-lived credentials. The registration is managed here, not by hand; gamma's pre-existing one is
+# adopted with the import block below (aws_audience_import_object_id), never re-created.
+resource "azuread_application_registration" "aws_audience" {
+  for_each     = var.aws_federation_enabled ? toset(["main"]) : toset([])
+  display_name = var.aws_audience_display_name
+  # v1 tokens: issuer https://sts.windows.net/<tenant>/, which is what the AWS IAM OIDC provider trusts.
+  # v2 would change the issuer and break the federation.
+  requested_access_token_version = 1
+}
+
+resource "azuread_application_identifier_uri" "aws_audience" {
+  for_each       = azuread_application_registration.aws_audience
+  application_id = each.value.id
+  identifier_uri = "api://${each.value.client_id}"
+}
+
+import {
+  for_each = var.aws_audience_import_object_id == "" ? toset([]) : toset(["main"])
+  to       = azuread_application_registration.aws_audience[each.key]
+  id       = "/applications/${var.aws_audience_import_object_id}"
+}
+
+import {
+  for_each = var.aws_audience_import_object_id == "" ? toset([]) : toset(["main"])
+  to       = azuread_application_identifier_uri.aws_audience[each.key]
+  id       = "/applications/${var.aws_audience_import_object_id}/identifierUris/${base64encode(var.aws_audience_import_identifier_uri)}"
+}
+
+locals {
+  aws_web_identity_audience = var.aws_federation_enabled ? azuread_application_identifier_uri.aws_audience["main"].identifier_uri : ""
 }
 
 resource "azurerm_resource_group" "rg" {
@@ -198,7 +239,7 @@ resource "azurerm_linux_web_app" "app" {
     "ONEHOOK_DATA_API_AUTH_MODE"                 = var.onehook_data_api_auth_mode
     "ONEHOOK_DATA_API_AWS_REGION"                = var.onehook_data_api_aws_region
     "ONEHOOK_DATA_API_AWS_ROLE_ARN"              = var.onehook_data_api_aws_role_arn
-    "ONEHOOK_DATA_API_AWS_WEB_IDENTITY_AUDIENCE" = var.onehook_data_api_aws_web_identity_audience
+    "ONEHOOK_DATA_API_AWS_WEB_IDENTITY_AUDIENCE" = local.aws_web_identity_audience
     "EPHEMERAL_CONTEXT_MAX_MESSAGES"             = tostring(var.ephemeral_context_max_messages)
     "EPHEMERAL_CONTEXT_MAX_CHARACTERS"           = tostring(var.ephemeral_context_max_characters)
     "CONTEXT_REQUEST_MAX_MESSAGES"               = tostring(var.context_request_max_messages)
