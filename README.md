@@ -210,23 +210,29 @@ Match-to-match messages never enter this lifecycle. They stay in the app's end-t
 
 When a member asks Mr OneHook to find a kind of person, the model adds an optional `matchSuggestion`
 (`prompt`: a third-person description of who they want, with no physical or sensitive traits;
-`reasoning`: one sentence for the member). The backend records it in the OneHook Matching service with
-`POST {ONEHOOK_MATCHING_API_URL}/matching/internal/users/{userId}/suggestions`, an AWS_IAM route,
-SigV4-signed with the same federated AWS role used for the AI-context route
-(`OneHook-UX-AiContext-<stage>`, allowed to invoke only those two routes). `userId` is the subject of
-the member token this service verified; the token itself is never forwarded. Matching enforces the
-Super+ tier from its own database and mixes people who fit the suggestion into the member's discover
-feed as "Mr. OneHook" cards carrying the reasoning.
+`reasoning`: one sentence for the member). The backend records it with
+`POST {ONEHOOK_MATCHING_API_URL}/matching/internal/suggestions`, which needs two proofs:
 
-Suggestions are recorded **only from product chats** (no `matchId`). In a connection chat the model
-also sees the other person's messages, which must never be able to plant suggestions in this
-member's feed.
+- **Service:** SigV4 with this service's federated AWS role, `OneHook-MrOneHook-<stage>-Role`. OneHookBackend
+  CDK creates the role and the IAM OIDC provider. It trusts only this App Service's managed identity for the
+  audience app registration below, and may invoke only the AI-context and suggestion routes.
+- **Member:** the member's own Cognito ID token in `X-OneHook-Member-Token`, inside the signed headers.
+  Matching verifies it and takes the member id and tier only from it, so this service can only act for a
+  member who is in a live session with it.
 
-The chat response then includes `matchSuggestion: { status, reasoning }`, where `status` is
-`RECORDED`, `PREMIUM_REQUIRED` (Super and above only) or `UNAVAILABLE`. The prompt is never returned,
-logged or stored here. `ONEHOOK_MATCHING_API_URL` (Terraform `onehook_matching_api_url`) must be the
-execute-api invoke URL including stage (SigV4 signs Host, so not the CloudFront ingress); empty, or a
-non-`sigv4` data-API auth mode, disables recording.
+A member has one such suggestion; a new request replaces it, and the member can remove it in their
+preferences. Suggestions are recorded **only from product chats** (no `matchId`): in a connection chat the
+model also sees the other person's messages, which must never plant suggestions in this member's feed.
+
+The chat response includes `matchSuggestion: { status, reasoning }` (`RECORDED`, `PREMIUM_REQUIRED`,
+`UNAVAILABLE`). The prompt is never returned, logged or stored here.
+
+**Federation is code.** The Entra app registration whose identifier URI is the AWS audience is managed by
+Terraform here (`azuread_application_registration.aws_audience`, v1 tokens because the AWS provider
+trusts the `sts.windows.net` issuer); gamma's pre-existing registration is adopted by an `import` block.
+`terraform output aws_federation` gives the tenant, audience and managed-identity principal id that
+OneHookBackend `infra/config/mr-onehook.ts` must hold. Applying it needs Entra permissions to manage app
+registrations (Application Administrator, or `Application.ReadWrite.OwnedBy` as an owner).
 
 ## Local Development
 

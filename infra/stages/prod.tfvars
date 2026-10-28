@@ -21,15 +21,16 @@ cors_allowed_origins = ["https://onehook.club", "https://www.onehook.club"]
 # /health and the public product chat, and clients report member features as "not configured".
 # Never point prod at the gamma Cognito pool. Fill these from the OneHook-*-prod stack outputs and
 # set contextual_ai_enabled = true once prod is live.
-contextual_ai_enabled                      = false
-chat_session_storage_enabled               = false
-auth_issuer                                = ""
-auth_audience                              = ""
-auth_jwks_uri                              = ""
-onehook_data_api_url                       = ""
-onehook_data_api_scope                     = "https://api.onehook.club/.default"
-onehook_data_api_aws_role_arn              = ""
-onehook_data_api_aws_web_identity_audience = ""
+contextual_ai_enabled        = false
+chat_session_storage_enabled = false
+auth_issuer                  = ""
+auth_audience                = ""
+auth_jwks_uri                = ""
+onehook_data_api_url         = ""
+onehook_data_api_scope       = "https://api.onehook.club/.default"
+# Set to OneHook-MrOneHook-prod-Role once prod is in OneHookBackend infra/config/mr-onehook.ts.
+onehook_data_api_aws_role_arn = ""
+aws_federation_enabled        = false
 
 # Empty until prod Matching is deployed and the prod AI-context role may invoke its suggestion route.
 onehook_matching_api_url = ""

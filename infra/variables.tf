@@ -160,15 +160,33 @@ variable "onehook_data_api_aws_region" {
 }
 
 variable "onehook_data_api_aws_role_arn" {
-  description = "AWS IAM role ARN the App Service managed identity assumes (via STS web-identity) to call the ai-context route; empty disables the cross-cloud exchange"
+  description = "ARN of OneHook-MrOneHook-<stage>-Role (OneHookBackend Matching stack output MrOneHookRoleArn). The App Service managed identity assumes it via STS web-identity to call the AI-context and internal suggestion routes. Empty disables the cross-cloud exchange."
   type        = string
-  default     = "arn:aws:iam::627367419734:role/OneHook-UX-AiContext-gamma"
+  default     = ""
 }
 
-variable "onehook_data_api_aws_web_identity_audience" {
-  description = "Entra audience the managed identity requests and the AWS role's OIDC trust expects (e.g. api://<appId>)"
+variable "aws_federation_enabled" {
+  description = "Manage the Entra app registration whose identifier URI is the audience the AWS role trusts."
+  type        = bool
+  default     = false
+}
+
+variable "aws_audience_display_name" {
+  description = "Display name of the Entra app registration used as the AWS federation audience."
   type        = string
-  default     = "api://8a078d5e-ad9d-4156-b89d-419871233992"
+  default     = ""
+}
+
+variable "aws_audience_import_object_id" {
+  description = "Object id of a pre-existing audience app registration to adopt into state (gamma). Empty creates a new one."
+  type        = string
+  default     = ""
+}
+
+variable "aws_audience_import_identifier_uri" {
+  description = "Identifier URI of the pre-existing registration being adopted (must be api://<its appId>)."
+  type        = string
+  default     = ""
 }
 
 variable "ephemeral_context_max_messages" {
