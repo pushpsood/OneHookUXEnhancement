@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import type { AzureOpenAI } from 'openai';
-import { createJwtAuthenticator, requirePermission } from './auth';
+import { createJwtAuthenticator } from './auth';
+import { QuotaUnavailableError, unavailableChatQuota, type ChatQuota } from './chatQuota';
+import { PAID_SUBSCRIPTION_TIERS } from 'onehook-api-client/membership';
 import type { ContextualFeatureConfig, ChatSessionTierPolicy } from './contextConfig';
 import {
   ChatSessionAccessError,
@@ -23,6 +25,8 @@ import {
 
 interface ContextualServices {
   client: AzureOpenAI;
+  /** Free-tier daily message allowance (Azure Table Storage). Paid tiers never use it. */
+  chatQuota?: ChatQuota;
   /** Records OneHook suggestions in Matching (AWS) with the member's token. */
   suggestionRecorder?: SuggestionRecorder;
   deployment: string;
@@ -110,7 +114,6 @@ export function createContextualRouter(
   router.post(
     '/api/member/product-connection-chat',
     authenticateUser,
-    requirePermission(config.userChatPermission),
     userRateLimit,
     async (req, res): Promise<void> => {
       const requestId = requestIdFor(req);
@@ -127,6 +130,7 @@ export function createContextualRouter(
         return;
       }
 
+      let quotaTaken = false;
       try {
         const subject = req.auth!.subject;
         let sessionPolicy: ChatSessionTierPolicy | undefined;
@@ -162,6 +166,19 @@ export function createContextualRouter(
         if (input.ephemeralMessageContext && (!match || !match.messageHistoryAllowed)) {
           res.status(403).json({ error: 'MESSAGE_CONTEXT_NOT_ALLOWED', requestId });
           return;
+        }
+        // Free tier (Must): 10 messages per UTC day; paid tiers unlimited. The tier is the verified
+        // token's, never the client's. The slot is taken before the model call and given back if it fails.
+        const paid = PAID_SUBSCRIPTION_TIERS.some((t) => t.wire === req.auth!.membership);
+        let remainingMessages: number | undefined;
+        if (!paid) {
+          const decision = await (services.chatQuota ?? unavailableChatQuota).consume(subject);
+          if (!decision.allowed) {
+            res.status(402).json({ error: 'MESSAGE_LIMIT_REACHED', remainingMessages: 0, requestId });
+            return;
+          }
+          remainingMessages = decision.remaining;
+          quotaTaken = true;
         }
         const productContext = await services.productContextProvider(input.message);
         const excerpts = match && match.messageHistoryAllowed && input.includeMessageHistory
@@ -221,8 +238,10 @@ export function createContextualRouter(
         const responseResult = publicResult.needsMoreContext && publicResult.contextRequest
           ? { ...publicResult, contextRequest: { ...publicResult.contextRequest, requestId } }
           : publicResult;
+        quotaTaken = false; // answered: the message is spent
         res.json({
           ...responseResult,
+          ...(remainingMessages !== undefined ? { remainingMessages } : {}),
           ...(matchSuggestion ? { matchSuggestion } : {}),
           contextUsed,
           requestId,
@@ -238,6 +257,12 @@ export function createContextualRouter(
             : {}),
         });
       } catch (error: unknown) {
+        if (quotaTaken) await (services.chatQuota ?? unavailableChatQuota).release(req.auth!.subject);
+        if (error instanceof QuotaUnavailableError) {
+          console.error('Chat quota store unavailable', { requestId });
+          res.status(503).json({ error: 'CHAT_TEMPORARILY_UNAVAILABLE', requestId });
+          return;
+        }
         if (error instanceof ChatSessionAccessError) {
           res.status(404).json({ error: 'CHAT_SESSION_NOT_FOUND', requestId });
           return;
@@ -273,7 +298,6 @@ export function createContextualRouter(
   router.get(
     '/api/member/product-connection-chat/sessions',
     authenticateUser,
-    requirePermission(config.userChatPermission),
     userRateLimit,
     async (req, res): Promise<void> => {
       try {
@@ -291,7 +315,6 @@ export function createContextualRouter(
   router.get(
     '/api/member/product-connection-chat/sessions/:sessionId',
     authenticateUser,
-    requirePermission(config.userChatPermission),
     userRateLimit,
     async (req, res): Promise<void> => {
       const policy = req.auth!.tier ? config.sessionTierPolicies[req.auth!.tier] : undefined;
@@ -345,7 +368,6 @@ export function createContextualRouter(
   router.delete(
     '/api/member/product-connection-chat/sessions/:sessionId',
     authenticateUser,
-    requirePermission(config.userChatPermission),
     userRateLimit,
     async (req, res): Promise<void> => {
       try {

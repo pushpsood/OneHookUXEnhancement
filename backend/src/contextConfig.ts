@@ -10,7 +10,8 @@ export interface ContextualFeatureConfig {
   authJwksUri: string;
   authAlgorithms: string[];
   corsAllowedOrigins: string[];
-  userChatPermission: string;
+  /** Azure Table Storage table holding the free-tier daily message counters. */
+  chatQuotaTableName: string;
   oneHookDataApiUrl: string;
   /**
    * Matching service execute-api invoke URL incl. stage (e.g. https://abc.execute-api.ap-south-1.amazonaws.com/gamma).
@@ -182,7 +183,7 @@ export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env
         .filter((value) => asymmetricAlgorithms.has(value));
       return configured.length > 0 ? configured : ['RS256'];
     })(),
-    userChatPermission: env.AUTH_CHAT_PERMISSION?.trim() ?? 'context.chat',
+    chatQuotaTableName: env.AZURE_CHAT_QUOTA_TABLE?.trim() ?? '',
     maxInputCharacters: readInteger(env.CONTEXT_MAX_INPUT_CHARACTERS, 4000, 100, 16000),
     maxEphemeralMessages: readInteger(env.EPHEMERAL_CONTEXT_MAX_MESSAGES, 30, 1, 100),
     maxEphemeralCharacters: readInteger(env.EPHEMERAL_CONTEXT_MAX_CHARACTERS, 12000, 500, 50000),

@@ -78,8 +78,10 @@ export function createJwtAuthenticator(config: ContextualFeatureConfig, audience
         throw new Error('Missing stable subject');
       }
       const tier = resolveSessionTier(payload, config.sessionTierClaim, config.sessionTierPolicies);
+      const rawTier = payload[config.sessionTierClaim];
       req.auth = {
         subject: payload.sub,
+        membership: resolveSubscriptionTier(typeof rawTier === 'string' ? rawTier : undefined),
         permissions: extractPermissions(payload),
         ...(tier ? { tier } : {}),
       };

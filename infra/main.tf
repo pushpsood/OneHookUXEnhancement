@@ -228,6 +228,7 @@ resource "azurerm_linux_web_app" "app" {
     "AZURE_STORAGE_ACCOUNT"                      = azurerm_storage_account.storage.name
     "AZURE_STORAGE_CONTAINER"                    = azurerm_storage_container.context_container.name
     "AZURE_SESSION_CONTAINER"                    = azurerm_storage_container.session_container.name
+    "AZURE_CHAT_QUOTA_TABLE"                     = azurerm_storage_table.chat_quota.name
     "CONTEXTUAL_AI_ENABLED"                      = tostring(var.contextual_ai_enabled)
     "AUTH_ISSUER"                                = var.auth_issuer
     "AUTH_AUDIENCE"                              = var.auth_audience
@@ -274,6 +275,19 @@ resource "azurerm_role_assignment" "app_openai_user" {
 }
 
 # AI session runtime writes are scoped to the dedicated private session container.
+# Free-tier Mr OneHook daily message counters: one row per member (hashed id), overwritten each UTC day.
+resource "azurerm_storage_table" "chat_quota" {
+  name               = "chatquota"
+  storage_account_id = azurerm_storage_account.storage.id
+}
+
+# The app may read/write rows in THIS table only (managed identity, no keys).
+resource "azurerm_role_assignment" "app_chat_quota_table" {
+  scope                = "${azurerm_storage_account.storage.id}/tableServices/default/tables/${azurerm_storage_table.chat_quota.name}"
+  role_definition_name = "Storage Table Data Contributor"
+  principal_id         = azurerm_linux_web_app.app.identity[0].principal_id
+}
+
 resource "azurerm_role_assignment" "app_session_storage_contributor" {
   scope                = "${azurerm_storage_account.storage.id}/blobServices/default/containers/${azurerm_storage_container.session_container.name}"
   role_definition_name = "Storage Blob Data Contributor"
