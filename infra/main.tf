@@ -14,6 +14,10 @@ terraform {
       source  = "hashicorp/azuread"
       version = "~> 3.0"
     }
+    azapi = {
+      source  = "Azure/azapi"
+      version = "~> 2.0"
+    }
   }
 
   backend "azurerm" {
@@ -34,6 +38,8 @@ provider "azurerm" {
 }
 
 provider "azuread" {}
+
+provider "azapi" {}
 
 # ── AWS federation (Mr OneHook -> OneHook AWS) ─────────────────────────────────
 # The App Service's managed identity requests an Entra token for THIS app registration's identifier URI
@@ -228,7 +234,7 @@ resource "azurerm_linux_web_app" "app" {
     "AZURE_STORAGE_ACCOUNT"                      = azurerm_storage_account.storage.name
     "AZURE_STORAGE_CONTAINER"                    = azurerm_storage_container.context_container.name
     "AZURE_SESSION_CONTAINER"                    = azurerm_storage_container.session_container.name
-    "AZURE_CHAT_QUOTA_TABLE"                     = azurerm_storage_table.chat_quota.name
+    "AZURE_CHAT_QUOTA_TABLE"                     = azapi_resource.chat_quota_table.name
     "CONTEXTUAL_AI_ENABLED"                      = tostring(var.contextual_ai_enabled)
     "AUTH_ISSUER"                                = var.auth_issuer
     "AUTH_AUDIENCE"                              = var.auth_audience
@@ -276,14 +282,29 @@ resource "azurerm_role_assignment" "app_openai_user" {
 
 # AI session runtime writes are scoped to the dedicated private session container.
 # Free-tier Mr OneHook daily message counters: one row per member (hashed id), overwritten each UTC day.
-resource "azurerm_storage_table" "chat_quota" {
-  name               = "chatquota"
-  storage_account_id = azurerm_storage_account.storage.id
+# Created through ARM (azapi), not the table data plane: the storage account has shared keys disabled, and
+# azurerm_storage_table's data-plane ACL step needs a key.
+resource "azapi_resource" "chat_quota_table" {
+  type      = "Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01"
+  name      = "chatquota"
+  parent_id = "${azurerm_storage_account.storage.id}/tableServices/default"
+}
+
+removed {
+  from = azurerm_storage_table.chat_quota
+  lifecycle {
+    destroy = false
+  }
+}
+
+import {
+  to = azapi_resource.chat_quota_table
+  id = "${azurerm_storage_account.storage.id}/tableServices/default/tables/chatquota"
 }
 
 # The app may read/write rows in THIS table only (managed identity, no keys).
 resource "azurerm_role_assignment" "app_chat_quota_table" {
-  scope                = "${azurerm_storage_account.storage.id}/tableServices/default/tables/${azurerm_storage_table.chat_quota.name}"
+  scope                = "${azurerm_storage_account.storage.id}/tableServices/default/tables/${azapi_resource.chat_quota_table.name}"
   role_definition_name = "Storage Table Data Contributor"
   principal_id         = azurerm_linux_web_app.app.identity[0].principal_id
 }

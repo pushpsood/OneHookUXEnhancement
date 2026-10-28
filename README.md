@@ -217,7 +217,7 @@ Every signed-in member can chat with Mr OneHook; there is no group or `context.c
 - The tier is the verified token's `custom:subscriptionTier`, never the client's; an upgrade applies at
   the next token refresh.
 
-**Storage:** Azure Table Storage table `chatquota` in the existing storage account (Terraform), one row
+**Storage:** Azure Table Storage table `chatquota` in the existing storage account (Terraform, created through ARM with `azapi` because the account has shared keys disabled), one row
 per member (`PartitionKey` = sha256 of the member id, `RowKey` = `daily`) holding `{ day, count }`, overwritten
 when the UTC day changes, so rows never grow and need no cleanup. Increments are read-then-ETag-conditional
 writes (insert-if-absent for the first), retried on conflict, so concurrent messages cannot exceed the
