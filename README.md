@@ -28,7 +28,7 @@ flowchart LR
     subgraph UX["OneHook UX Enhancement package · Azure App Service"]
       PublicRoute["POST /api/public/product-chat"]
       MemberRoute["POST /api/member/product-connection-chat"]
-      UserAuth["Validate user JWT<br/>issuer · audience · JWKS · context.chat"]
+      UserAuth["Validate user JWT<br/>issuer · audience · JWKS · daily quota (Must)"]
       MatchGate{"matchId supplied?"}
       MatchAuth["Authorize active match<br/>and AI-visible profile policy"]
       ValidateExcerpts["Validate bounded ephemeral excerpts<br/>Never persist or log them"]
@@ -142,7 +142,7 @@ sequenceDiagram
     MemberAPI->>Cognito: Fetch signing keys
     Cognito-->>MemberAPI: JWKS
   end
-  MemberAPI->>MemberAPI: Verify JWT, context.chat, subject and Cognito tier
+  MemberAPI->>MemberAPI: Verify JWT, subject and Cognito tier; Must: take a daily message slot
   MemberAPI->>MemberAPI: Apply user rate limit and validate request budgets
   opt matchId supplied
     MemberAPI->>OneHookData: Authorize active match and request AI-visible profiles/policy
@@ -182,7 +182,7 @@ A product-only member request omits `matchId` and can never request match-messag
 
 #### Session lifecycle order
 
-All session paths first verify the user JWT, `context.chat`, and the per-user rate limit.
+All session paths first verify the user JWT and the per-user rate limit. There is no group or permission gate: every signed-in member may chat.
 
 1. **List sessions:** enumerate only `sessions/<hash(user)>/`, reject cross-user bindings, lazily remove expired records, and return non-content metadata with `scope: product | connection` instead of raw match IDs.
 2. **Read a session:** require a currently eligible Cognito tier, load only the user-scoped application-readable session, verify user and scope bindings, freshly reauthorize the match only for a connection-scoped session, apply the current tier's message cap, then return bounded AI turns.
@@ -205,6 +205,26 @@ Match-to-match messages never enter this lifecycle. They stay in the app's end-t
 | RBAC role assignments | Managed-identity access to OpenAI and container-scoped Blob session writes |
 
 ---
+
+## Who can chat: free tier quota
+
+Every signed-in member can chat with Mr OneHook; there is no group or `context.chat` gate.
+
+- **Must** (free, including a missing or unknown tier claim): **10 messages per UTC day**. Beyond that the
+  route returns `402 MESSAGE_LIMIT_REACHED` and the model is not called. Responses carry
+  `remainingMessages` so the apps can show "3 left today".
+- **Super and above:** unlimited (still subject to the 20 requests/minute burst limit).
+- The tier is the verified token's `custom:subscriptionTier`, never the client's; an upgrade applies at
+  the next token refresh.
+
+**Storage:** Azure Table Storage table `chatquota` in the existing storage account (Terraform), one row
+per member (`PartitionKey` = sha256 of the member id, `RowKey` = `daily`) holding `{ day, count }`, overwritten
+when the UTC day changes, so rows never grow and need no cleanup. Increments are read-then-ETag-conditional
+writes (insert-if-absent for the first), retried on conflict, so concurrent messages cannot exceed the
+limit. The slot is taken before the model call and released if it fails. The app reaches the table with
+its managed identity and a **Storage Table Data Contributor** role scoped to that one table. If the store
+is unavailable, free members get `503 CHAT_TEMPORARILY_UNAVAILABLE` (never unlimited); paid members are
+unaffected. The rows hold no message content.
 
 ## Mr OneHook "find me ..." suggestions
 
@@ -268,7 +288,7 @@ npm run dev
 | `AUTH_AUDIENCE` | Exact authenticated member-API audience | — | When enabled |
 | `AUTH_JWKS_URI` | HTTPS signing-key endpoint | — | When enabled |
 | `AUTH_ALLOWED_ALGORITHMS` | Comma-separated asymmetric JWT algorithms | `RS256` | No |
-| `AUTH_CHAT_PERMISSION` | Required user scope/role | `context.chat` | No |
+| `AZURE_CHAT_QUOTA_TABLE` | Table Storage table for the free-tier daily counters | `chatquota` (Terraform) | Yes for free members |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated exact OneHook browser origins | — | When enabled |
 | `ONEHOOK_DATA_API_URL` | Authoritative OneHook match/profile-policy service base URL | — | When enabled |
 | `ONEHOOK_DATA_API_SCOPE` | Managed-identity OAuth scope for that service | — | When enabled |
@@ -293,10 +313,10 @@ Terraform injects the non-secret production settings. Authentication values rema
 |---|---|---|---|
 | `GET` | `/health` | None | Health check |
 | `POST` | `/api/public/product-chat` | None | Anonymous product questions; accepts `{ messages, userDemographics }` and cannot access private context |
-| `POST` | `/api/member/product-connection-chat` | Bearer token with `context.chat` | Product questions with optional authorized match/profile and app-selected ephemeral message excerpts; tier-gated AI sessions |
-| `GET` | `/api/member/product-connection-chat/sessions` | Bearer token with `context.chat` | List the caller's retained AI-session metadata |
-| `GET` | `/api/member/product-connection-chat/sessions/:sessionId` | Bearer token, `context.chat`, eligible current tier | Read one own AI session; connection sessions receive a fresh match authorization check |
-| `DELETE` | `/api/member/product-connection-chat/sessions/:sessionId` | Bearer token with `context.chat` | Delete one own retained AI session, including after downgrade |
+| `POST` | `/api/member/product-connection-chat` | Member bearer token | Product questions with optional authorized match/profile and app-selected ephemeral message excerpts; tier-gated AI sessions |
+| `GET` | `/api/member/product-connection-chat/sessions` | Member bearer token | List the caller's retained AI-session metadata |
+| `GET` | `/api/member/product-connection-chat/sessions/:sessionId` | Member bearer token, eligible current tier | Read one own AI session; connection sessions receive a fresh match authorization check |
+| `DELETE` | `/api/member/product-connection-chat/sessions/:sessionId` | Member bearer token | Delete one own retained AI session, including after downgrade |
 
 ### Public product chat contract
 

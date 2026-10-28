@@ -6,6 +6,8 @@ export interface AuthenticatedPrincipal {
   subject: string;
   /** Wire value from onehook-api-client, set only when the tier has a session policy. */
   tier?: SubscriptionTier;
+  /** The verified token's membership tier for entitlements (missing/unknown = Must). Never from the client. */
+  membership: SubscriptionTier;
   permissions: Set<string>;
 }
 

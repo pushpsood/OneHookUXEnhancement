@@ -9,6 +9,8 @@ import { createContextualRouter } from './contextRoutes';
 import { PlaintextChatSessionStore } from './plaintextChatSessionStore';
 import { OneHookDataClient, BearerTokenSigner, type RequestSigner } from './oneHookDataClient';
 import { MatchingSuggestionClient } from './matchingSuggestionClient';
+import { TableClient } from '@azure/data-tables';
+import { TableChatQuota } from './chatQuota';
 import { SigV4RequestSigner } from './sigv4Signer';
 import { createAzureWebIdentityCredentialProvider } from './azureAwsCredentials';
 import { parseContextualModelResponse } from './contextPrompt';
@@ -123,10 +125,18 @@ if (contextualConfig.ready && blobServiceClient) {
   if (!suggestionsEnabled) {
     console.warn('[WARN] OneHook suggestions are off (needs ONEHOOK_MATCHING_API_URL and sigv4 auth mode)');
   }
+  // Free-tier daily message counters (Azure Table Storage, managed identity). Missing config means free
+  // members get 503 (never unlimited); paid members are unaffected.
+  const chatQuota = contextualConfig.chatQuotaTableName && storageAccountName
+    ? new TableChatQuota(new TableClient(
+        `https://${storageAccountName}.table.core.windows.net`, contextualConfig.chatQuotaTableName, credential))
+    : undefined;
+  if (!chatQuota) console.warn('[WARN] AZURE_CHAT_QUOTA_TABLE is not set; free members cannot chat');
   app.use(createContextualRouter(contextualConfig, {
     client,
     deployment,
     dataClient,
+    ...(chatQuota ? { chatQuota } : {}),
     ...(suggestionsEnabled
       ? {
           suggestionRecorder: new MatchingSuggestionClient(
