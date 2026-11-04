@@ -31,6 +31,8 @@ export interface ContextualChatInput {
   ephemeralMessageContext?: EphemeralMessageContext;
   contextRequestId?: string;
   persistSession: boolean;
+  /** At the session cap, replace the least recently active session instead of refusing. */
+  replaceLeastRecent?: boolean;
   sessionId?: string;
 }
 
@@ -151,6 +153,9 @@ export function parseContextualChatInput(
   if (sessionOptions.sessionId !== undefined && sessionOptions.persist === false) {
     throw new Error('Cannot continue a session without persistence');
   }
+  if (sessionOptions.replaceLeastRecent !== undefined && typeof sessionOptions.replaceLeastRecent !== 'boolean') {
+    throw new Error('Invalid replaceLeastRecent option');
+  }
   const persistSession = sessionOptions.persist === true || typeof sessionOptions.sessionId === 'string';
 
   return {
@@ -162,5 +167,6 @@ export function parseContextualChatInput(
     ...(contextRequestId ? { contextRequestId } : {}),
     persistSession,
     ...(typeof sessionOptions.sessionId === 'string' ? { sessionId: sessionOptions.sessionId } : {}),
+    ...(sessionOptions.replaceLeastRecent === true ? { replaceLeastRecent: true } : {}),
   };
 }
