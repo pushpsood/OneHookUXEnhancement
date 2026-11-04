@@ -7,7 +7,7 @@ import { BlobServiceClient } from '@azure/storage-blob';
 import { loadContextualFeatureConfig } from './contextConfig';
 import { createContextualRouter } from './contextRoutes';
 import { PlaintextChatSessionStore } from './plaintextChatSessionStore';
-import { OneHookDataClient, BearerTokenSigner, type RequestSigner } from './oneHookDataClient';
+import { OneHookDataClient, type RequestSigner } from './oneHookDataClient';
 import { MatchingSuggestionClient } from './matchingSuggestionClient';
 import { TableClient } from '@azure/data-tables';
 import { TableChatQuota } from './chatQuota';
@@ -84,13 +84,9 @@ if (contextualConfig.ready && blobServiceClient) {
   if (contextualConfig.sessionStorageEnabled && !contextualConfig.sessionStorageReady) {
     console.warn('[WARN] Chat session storage is enabled but unavailable:', contextualConfig.sessionMissing.join(', '));
   }
-  // Choose how we authenticate to the authoritative data API. The AWS AI-context route is
-  // AuthorizationType AWS_IAM, so SigV4 is the default; a token-authorized deployment can opt into
-  // bearer auth via ONEHOOK_DATA_API_AUTH_MODE=bearer.
+  // The OneHook AWS routes are AWS_IAM only, so every call is SigV4-signed.
   let dataApiSigner: RequestSigner;
-  if (contextualConfig.oneHookDataApiAuthMode === 'bearer') {
-    dataApiSigner = new BearerTokenSigner(credential, contextualConfig.oneHookDataApiScope);
-  } else if (
+  if (
     contextualConfig.oneHookDataApiAwsRoleArn
     && contextualConfig.oneHookDataApiAwsWebIdentityAudience
   ) {
@@ -120,10 +116,9 @@ if (contextualConfig.ready && blobServiceClient) {
     contextualConfig.dataApiTimeoutMs,
   );
   // Suggestions go to Matching's IAM-only route, so they need the SigV4 signer (federated AWS role).
-  const suggestionsEnabled = Boolean(contextualConfig.oneHookMatchingApiUrl)
-    && contextualConfig.oneHookDataApiAuthMode === 'sigv4';
+  const suggestionsEnabled = Boolean(contextualConfig.oneHookMatchingApiUrl);
   if (!suggestionsEnabled) {
-    console.warn('[WARN] OneHook suggestions are off (needs ONEHOOK_MATCHING_API_URL and sigv4 auth mode)');
+    console.warn('[WARN] OneHook suggestions are off (needs ONEHOOK_MATCHING_API_URL)');
   }
   // Free-tier daily message counters (Azure Table Storage, managed identity). Missing config means free
   // members get 503 (never unlimited); paid members are unaffected.

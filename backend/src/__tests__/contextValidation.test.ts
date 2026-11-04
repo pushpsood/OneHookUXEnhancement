@@ -21,7 +21,6 @@ test('contextual feature becomes ready only with every integration setting', () 
     AUTH_JWKS_URI: 'https://issuer.example/jwks',
     CORS_ALLOWED_ORIGINS: 'https://app.onehook.example',
     ONEHOOK_DATA_API_URL: 'https://data.example/',
-    ONEHOOK_DATA_API_SCOPE: 'api://data/.default',
     ONEHOOK_DATA_API_AWS_REGION: 'ap-south-1',
     AZURE_STORAGE_ACCOUNT: 'storage',
     AZURE_SESSION_CONTAINER: 'aisessions',
@@ -44,9 +43,8 @@ test('data API auth mode decides which integration setting is required', () => {
     AZURE_SESSION_CONTAINER: 'aisessions',
   };
 
-  // Default (sigv4): a region is required; a scope is not.
+  // A region is required (calls are always SigV4-signed).
   const sigv4Missing = loadContextualFeatureConfig(base);
-  assert.equal(sigv4Missing.oneHookDataApiAuthMode, 'sigv4');
   assert.equal(sigv4Missing.ready, false);
   assert.ok(sigv4Missing.missing.includes('ONEHOOK_DATA_API_AWS_REGION'));
 
@@ -54,18 +52,6 @@ test('data API auth mode decides which integration setting is required', () => {
   assert.equal(sigv4Ready.ready, true);
   assert.equal(sigv4Ready.oneHookDataApiAwsService, 'execute-api');
 
-  // Bearer mode: a scope is required; a region is not.
-  const bearerMissing = loadContextualFeatureConfig({ ...base, ONEHOOK_DATA_API_AUTH_MODE: 'bearer' });
-  assert.equal(bearerMissing.oneHookDataApiAuthMode, 'bearer');
-  assert.equal(bearerMissing.ready, false);
-  assert.ok(bearerMissing.missing.includes('ONEHOOK_DATA_API_SCOPE'));
-
-  const bearerReady = loadContextualFeatureConfig({
-    ...base,
-    ONEHOOK_DATA_API_AUTH_MODE: 'bearer',
-    ONEHOOK_DATA_API_SCOPE: 'api://data/.default',
-  });
-  assert.equal(bearerReady.ready, true);
 });
 
 test('permissions combine OAuth scopes and roles', () => {
@@ -101,7 +87,6 @@ test('symmetric JWT algorithms are rejected', () => {
     AUTH_JWKS_URI: 'https://issuer.example/jwks',
     CORS_ALLOWED_ORIGINS: 'https://app.onehook.example',
     ONEHOOK_DATA_API_URL: 'https://data.example',
-    ONEHOOK_DATA_API_SCOPE: 'api://data/.default',
     ONEHOOK_DATA_API_AWS_REGION: 'ap-south-1',
     AZURE_STORAGE_ACCOUNT: 'storage',
     AZURE_SESSION_CONTAINER: 'aisessions',
@@ -119,7 +104,6 @@ test('session storage becomes ready only with a valid bounded tier policy', () =
     AUTH_JWKS_URI: 'https://issuer.example/jwks',
     CORS_ALLOWED_ORIGINS: 'https://app.example',
     ONEHOOK_DATA_API_URL: 'https://data.example',
-    ONEHOOK_DATA_API_SCOPE: 'scope',
     ONEHOOK_DATA_API_AWS_REGION: 'ap-south-1',
     AZURE_STORAGE_ACCOUNT: 'storage',
     AZURE_SESSION_CONTAINER: 'aisessions',

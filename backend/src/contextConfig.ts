@@ -18,8 +18,6 @@ export interface ContextualFeatureConfig {
    * Must be the execute-api host, not the CloudFront ingress: SigV4 signs the Host header. Empty = suggestions off.
    */
   oneHookMatchingApiUrl: string;
-  oneHookDataApiScope: string;
-  oneHookDataApiAuthMode: 'sigv4' | 'bearer';
   oneHookDataApiAwsRegion: string;
   oneHookDataApiAwsService: string;
   oneHookDataApiAwsRoleArn: string;
@@ -106,11 +104,7 @@ function readInteger(value: string | undefined, fallback: number, min: number, m
 
 export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env): ContextualFeatureConfig {
   const enabled = readBoolean(env.CONTEXTUAL_AI_ENABLED, false);
-  // How the backend authenticates to the authoritative data API. 'sigv4' (default) targets the AWS
-  // API Gateway AI-context route (AuthorizationType AWS_IAM); 'bearer' targets a token-authorized
-  // endpoint and uses ONEHOOK_DATA_API_SCOPE. The mode decides which settings are required.
-  const authMode: 'sigv4' | 'bearer' =
-    (env.ONEHOOK_DATA_API_AUTH_MODE?.trim().toLowerCase() === 'bearer') ? 'bearer' : 'sigv4';
+  // The OneHook AWS routes (AI context, suggestions) are AWS_IAM only, so calls are always SigV4-signed.
   const awsRegion = env.ONEHOOK_DATA_API_AWS_REGION?.trim()
     ?? env.AWS_REGION?.trim()
     ?? '';
@@ -127,8 +121,6 @@ export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env
     corsAllowedOrigins: (env.CORS_ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean),
     oneHookDataApiUrl: env.ONEHOOK_DATA_API_URL?.trim().replace(/\/$/, '') ?? '',
     oneHookMatchingApiUrl: env.ONEHOOK_MATCHING_API_URL?.trim().replace(/\/$/, '') ?? '',
-    oneHookDataApiScope: env.ONEHOOK_DATA_API_SCOPE?.trim() ?? '',
-    oneHookDataApiAuthMode: authMode,
     oneHookDataApiAwsRegion: awsRegion,
     oneHookDataApiAwsService: awsService,
     oneHookDataApiAwsRoleArn: awsRoleArn,
@@ -145,12 +137,7 @@ export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env
     ['ONEHOOK_DATA_API_URL', values.oneHookDataApiUrl],
     ['AZURE_STORAGE_ACCOUNT', values.storageAccountName],
     ['AZURE_SESSION_CONTAINER', values.sessionContainerName],
-    // Mode-specific: SigV4 needs a region; bearer needs a scope. Enforcing per-mode keeps the
-    // readiness check honest — a SigV4 deployment is not blocked by a missing OAuth scope, and a
-    // bearer deployment is not silently unauthenticated for lack of a region.
-    ...(authMode === 'sigv4'
-      ? ([['ONEHOOK_DATA_API_AWS_REGION', values.oneHookDataApiAwsRegion]] as Array<[string, string]>)
-      : ([['ONEHOOK_DATA_API_SCOPE', values.oneHookDataApiScope]] as Array<[string, string]>)),
+    ['ONEHOOK_DATA_API_AWS_REGION', values.oneHookDataApiAwsRegion],
   ];
   const missing = required.filter(([, value]) => value.length === 0).map(([name]) => name);
 

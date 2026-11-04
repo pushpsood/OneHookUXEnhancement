@@ -1,23 +1,12 @@
 import type { AiVisibleMatchContext, AiVisibleProfile } from './contextTypes';
 
-interface TokenCredentialLike {
-  getToken(scopes: string | string[]): Promise<{ token: string } | null>;
-}
-
 /**
  * Produces the authorization headers for a single outbound request to the authoritative OneHook
  * data API.
  *
- * <p>The data API is the trusted, cross-cloud projection endpoint that lives in the OneHook AWS
- * backend. Two concrete signing strategies implement this seam:</p>
- * <ul>
- *   <li>{@link BearerTokenSigner} — attaches an OAuth bearer token (used when the data API is fronted
- *       by a token authorizer; also what the unit tests use).</li>
- *   <li>{@link SigV4RequestSigner} — attaches AWS SigV4 headers, required because the AWS API Gateway
- *       route for the AI-context projection is authorized with {@code AWS_IAM}. An Azure App Service
- *       managed identity cannot mint AWS SigV4 directly, so the signer resolves AWS credentials from
- *       the standard provider chain (env vars / web-identity federation configured on the host).</li>
- * </ul>
+ * <p>The data API is the trusted, cross-cloud projection endpoint in the OneHook AWS backend. Its route
+ * is authorized with {@code AWS_IAM}, so {@link SigV4RequestSigner} attaches SigV4 headers (credentials
+ * from the Azure managed identity exchanged for the federated AWS role).</p>
  *
  * <p>The method/url/headers passed in already include {@code X-OneHook-User-Id} and {@code accept};
  * the signer returns the complete header set to send (including any it adds, e.g. Authorization,
@@ -33,28 +22,6 @@ export interface RequestSigner {
     /** Exact request body; SigV4 signs its hash, so it must be the bytes that are sent. */
     body?: string;
   }): Promise<Record<string, string>>;
-}
-
-/** Bearer-token signer backed by an Azure/OAuth token credential. */
-export class BearerTokenSigner implements RequestSigner {
-  constructor(
-    private readonly credential: TokenCredentialLike,
-    private readonly scope: string,
-  ) {}
-
-  async sign(request: {
-    method: string;
-    url: URL;
-    headers: Record<string, string>;
-  }): Promise<Record<string, string>> {
-    const token = await this.credential.getToken(this.scope);
-    if (!token) {
-      // Fail closed: send no Authorization header, so the server rejects with 401 and the caller
-      // surfaces an unavailable match rather than silently proceeding unauthenticated.
-      return request.headers;
-    }
-    return { ...request.headers, authorization: `Bearer ${token.token}` };
-  }
 }
 
 export class MatchContextUnavailableError extends Error {}
@@ -127,22 +94,6 @@ export class OneHookDataClient {
     this.signer = signer;
     this.timeoutMs = timeoutMs;
     this.fetchImpl = fetchImpl;
-  }
-
-  /**
-   * Backward-compatible factory. Historically the client was given an Azure/OAuth token credential +
-   * scope and attached a bearer token; that behaviour is preserved via {@link BearerTokenSigner} so
-   * existing wiring and tests are unchanged. The {@code new OneHookDataClient(url, scope, cred, ...)}
-   * call shape is kept by routing through this factory from a thin static wrapper below.
-   */
-  static withBearer(
-    baseUrl: string,
-    scope: string,
-    credential: TokenCredentialLike,
-    timeoutMs: number,
-    fetchImpl: typeof fetch = fetch,
-  ): OneHookDataClient {
-    return new OneHookDataClient(baseUrl, new BearerTokenSigner(credential, scope), timeoutMs, fetchImpl);
   }
 
   /**

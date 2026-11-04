@@ -291,7 +291,6 @@ npm run dev
 | `AZURE_CHAT_QUOTA_TABLE` | Table Storage table for the free-tier daily counters | `chatquota` (Terraform) | Yes for free members |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated exact OneHook browser origins | — | When enabled |
 | `ONEHOOK_DATA_API_URL` | Authoritative OneHook match/profile-policy service base URL | — | When enabled |
-| `ONEHOOK_DATA_API_SCOPE` | Managed-identity OAuth scope for that service | — | When enabled |
 | `ONEHOOK_DATA_API_TIMEOUT_MS` | Source-service timeout | `3000` | No |
 | `AZURE_SESSION_CONTAINER` | Private Mr OneHook AI-session container | — | When enabled |
 | `CONTEXT_MAX_INPUT_CHARACTERS` | Maximum question or individual excerpt length | `4000` | No |
