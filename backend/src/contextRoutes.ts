@@ -162,6 +162,28 @@ export function createContextualRouter(
           res.status(404).json({ error: 'CHAT_SESSION_NOT_FOUND', requestId });
           return;
         }
+        // A NEW saved session when the member already has their tier's maximum: refuse before the model
+        // call (listing the sessions so the app can offer a choice), or, when the member chose it, delete
+        // the least recently active one first. The store's index re-checks the cap when the turn is saved.
+        if (sessionPolicy && !existingSession) {
+          const current = await services.sessionStore.list(subject);
+          if (current.length >= sessionPolicy.maxSessions) {
+            if (!input.replaceLeastRecent) {
+              res.status(409).json({
+                error: 'CHAT_SESSION_LIMIT_REACHED',
+                maxSessions: sessionPolicy.maxSessions,
+                sessions: current,
+                requestId,
+              });
+              return;
+            }
+            // list() is newest first: drop from the end until there is room for one more.
+            for (const old of current.slice(sessionPolicy.maxSessions - 1).reverse()) {
+              await services.sessionStore.delete(subject, old.sessionId);
+              console.info('Replaced least recent chat session', { requestId });
+            }
+          }
+        }
 
         if (input.ephemeralMessageContext && (!match || !match.messageHistoryAllowed)) {
           res.status(403).json({ error: 'MESSAGE_CONTEXT_NOT_ALLOWED', requestId });

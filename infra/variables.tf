@@ -237,17 +237,18 @@ variable "chat_session_tier_policies" {
     retention_days = number
   }))
   default = {
-    # Super: unlimited Mr OneHook AI per the membership matrix; persisted sessions enabled.
+    # Super and Infinity: unlimited messages; at most 3 saved sessions in total. max_messages is how many
+    # recent turns a session keeps (and sends to the model), not a limit on sending.
     super = {
       enabled        = true
-      max_sessions   = 10
+      max_sessions   = 3
       max_messages   = 50
       retention_days = 30
     }
     # Infinity: up to 3 concurrent connections, so a higher session allowance.
     infinity = {
       enabled        = true
-      max_sessions   = 25
+      max_sessions   = 3
       max_messages   = 50
       retention_days = 30
     }
