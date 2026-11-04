@@ -242,8 +242,6 @@ resource "azurerm_linux_web_app" "app" {
     "CORS_ALLOWED_ORIGINS"                       = join(",", var.cors_allowed_origins)
     "ONEHOOK_DATA_API_URL"                       = var.onehook_data_api_url
     "ONEHOOK_MATCHING_API_URL"                   = var.onehook_matching_api_url
-    "ONEHOOK_DATA_API_SCOPE"                     = var.onehook_data_api_scope
-    "ONEHOOK_DATA_API_AUTH_MODE"                 = var.onehook_data_api_auth_mode
     "ONEHOOK_DATA_API_AWS_REGION"                = var.onehook_data_api_aws_region
     "ONEHOOK_DATA_API_AWS_ROLE_ARN"              = var.onehook_data_api_aws_role_arn
     "ONEHOOK_DATA_API_AWS_WEB_IDENTITY_AUDIENCE" = local.aws_web_identity_audience

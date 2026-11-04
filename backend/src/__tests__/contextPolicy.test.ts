@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { buildContextualSystemPrompt, parseContextualModelResponse } from '../contextPrompt';
 import { MatchContextAccessError, OneHookDataClient, sanitizeVisibleProfile } from '../oneHookDataClient';
 
-const credential = { getToken: async () => ({ token: 'service-token' }) };
+const signer = { sign: async (r: { headers: Record<string, string> }) => r.headers };
 
 test('profile sanitizer strips hidden fields and bounds lists', () => {
   const profile = sanitizeVisibleProfile({
@@ -24,7 +24,7 @@ test('authoritative match projection must bind requesting user', async () => {
     matchedUser: { id: 'user-2', visibleProfile: {} },
     contextPolicy: { profileAllowed: true, messageHistoryAllowed: true, policyVersion: '1' },
   }), { status: 200, headers: { 'content-type': 'application/json' } });
-  const client = OneHookDataClient.withBearer('https://data.example', 'scope', credential, 1000, fetchImpl);
+  const client = OneHookDataClient.withSigner('https://data.example', signer, 1000, fetchImpl);
   await assert.rejects(() => client.getAiVisibleMatch('user-1', 'match-1'), MatchContextAccessError);
 });
 

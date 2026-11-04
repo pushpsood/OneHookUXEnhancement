@@ -27,7 +27,6 @@ auth_issuer                  = ""
 auth_audience                = ""
 auth_jwks_uri                = ""
 onehook_data_api_url         = ""
-onehook_data_api_scope       = "https://api.onehook.club/.default"
 # Set to OneHook-MrOneHook-prod-Role once prod is in OneHookBackend infra/config/mr-onehook.ts.
 onehook_data_api_aws_role_arn = ""
 aws_federation_enabled        = false
