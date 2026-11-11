@@ -33,3 +33,9 @@ aws_federation_enabled        = false
 
 # Empty until prod Matching is deployed and the prod AI-context role may invoke its suggestion route.
 onehook_matching_api_url = ""
+
+# PLACEHOLDER: empty keeps the account-erasure worker off. The prod queue exists only once prod is in
+# OneHookBackend infra/config/mr-onehook.ts; then set this to the prod Matching stack output
+# UxErasureQueueUrl (https://sqs.<region>.amazonaws.com/<prod account>/OneHook-UxErasure-prod), together
+# with onehook_data_api_aws_role_arn above.
+ux_erasure_queue_url = ""

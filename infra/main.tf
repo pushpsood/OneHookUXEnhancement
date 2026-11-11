@@ -245,6 +245,7 @@ resource "azurerm_linux_web_app" "app" {
     "ONEHOOK_DATA_API_AWS_REGION"                = var.onehook_data_api_aws_region
     "ONEHOOK_DATA_API_AWS_ROLE_ARN"              = var.onehook_data_api_aws_role_arn
     "ONEHOOK_DATA_API_AWS_WEB_IDENTITY_AUDIENCE" = local.aws_web_identity_audience
+    "UX_ERASURE_QUEUE_URL"                       = var.ux_erasure_queue_url
     "EPHEMERAL_CONTEXT_MAX_MESSAGES"             = tostring(var.ephemeral_context_max_messages)
     "EPHEMERAL_CONTEXT_MAX_CHARACTERS"           = tostring(var.ephemeral_context_max_characters)
     "CONTEXT_REQUEST_MAX_MESSAGES"               = tostring(var.context_request_max_messages)

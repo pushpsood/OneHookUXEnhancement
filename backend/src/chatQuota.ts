@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { TableClient } from '@azure/data-tables';
+import { odata, type TableClient } from '@azure/data-tables';
 
 /**
  * Per-member daily Mr OneHook message allowance for the free tier (Must): 10 messages per UTC day.
@@ -30,7 +30,7 @@ export interface ChatQuota {
 export class QuotaUnavailableError extends Error {}
 
 /** Minimal surface of TableClient used here, so tests can fake it without Azure. */
-export type QuotaTable = Pick<TableClient, 'getEntity' | 'createEntity' | 'updateEntity'>;
+export type QuotaTable = Pick<TableClient, 'getEntity' | 'createEntity' | 'updateEntity' | 'listEntities' | 'deleteEntity'>;
 
 interface Row {
   partitionKey: string;
@@ -107,6 +107,34 @@ export class TableChatQuota implements ChatQuota {
     } catch {
       // Best effort: a failed release only costs the member one message.
     }
+  }
+
+  /**
+   * Account deletion: removes every ledger row of the member (the whole `sha256(userId)` partition, today
+   * only the `daily` row). Idempotent: a row that is already gone is fine. Throws on any other store
+   * failure so the caller retries. Returns the number of rows removed.
+   */
+  async eraseUser(userId: string): Promise<number> {
+    const pk = partitionFor(userId);
+    const rowKeys: string[] = [];
+    const rows = this.table.listEntities<{ rowKey?: string }>({
+      queryOptions: { filter: odata`PartitionKey eq ${pk}`, select: ['RowKey'] },
+    });
+    for await (const row of rows) {
+      if (typeof row.rowKey === 'string') rowKeys.push(row.rowKey);
+    }
+    // The known row is deleted even if the listing missed it, so a lagging listing cannot leave it behind.
+    if (!rowKeys.includes(ROW)) rowKeys.push(ROW);
+    let removed = 0;
+    for (const rowKey of rowKeys) {
+      try {
+        await this.table.deleteEntity(pk, rowKey);
+        removed += 1;
+      } catch (error) {
+        if (statusOf(error) !== 404) throw error;
+      }
+    }
+    return removed;
   }
 
   private async read(pk: string): Promise<Row | undefined> {

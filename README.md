@@ -18,10 +18,13 @@ flowchart LR
 
   subgraph AWS["Amazon Web Services · AWS"]
     Cognito["Amazon Cognito<br/>JWT/JWKS + tier claim"]
+    UxQueue[("SQS OneHook-UxErasure-&lt;stage&gt;<br/>UserDeleted from Profile")]
   end
 
   subgraph OneHookPlatform["OneHook platform services"]
     OneHookData["Authoritative match/profile policy API<br/>GET /api/ai-context/matches/:matchId"]
+    MatchingStatus["State: member matching mode<br/>GET /state/internal/users/:userId/matching"]
+    Suggestions["Matching: record suggestion<br/>POST /matching/internal/suggestions"]
   end
 
   subgraph Azure["Microsoft Azure"]
@@ -40,11 +43,14 @@ flowchart LR
       ContextRequest["Return bounded search terms<br/>date range + max messages"]
       PublicResult["Product reply + mood"]
       MemberResult["Member reply + mood<br/>contextUsed + optional session metadata"]
+      SuggestionGate{"matchSuggestion and<br/>member matching ON?"}
+      ErasureWorker["Account erasure worker<br/>long-polls UserDeleted"]
     end
 
     subgraph AzureServices["Azure managed services"]
       ProductBlob[("Private codecontext container<br/>CRUX.md")]
       SessionBlob[("Private aisessions container<br/>AI turns + hashed quota ledgers")]
+      QuotaTable[("Table chatquota<br/>free-tier daily counters")]
       OpenAI["Azure OpenAI<br/>structured completion"]
     end
   end
@@ -78,6 +84,14 @@ flowchart LR
   ContextDecision -->|"Yes"| ContextRequest
   ContextDecision -->|"No"| MemberResult --> MemberApp
   MemberResult -->|"Persist completed AI exchange when requested"| SessionStore
+  MemberResult --> SuggestionGate
+  SuggestionGate <-->|"Read status first (fail closed)"| MatchingStatus
+  SuggestionGate -->|"Only when ON"| Suggestions
+
+  UxQueue -->|"SigV4, federated role"| ErasureWorker
+  ErasureWorker -->|"Delete the member's sessions + session index"| SessionBlob
+  ErasureWorker -->|"Delete the member's ledger rows"| QuotaTable
+  ErasureWorker -->|"Delete the message only after both"| UxQueue
 
   style AWS fill:#fff7e6,stroke:#ff9900,stroke-width:2px
   style OneHookPlatform fill:#f7f3ff,stroke:#6f42c1,stroke-width:2px
@@ -187,6 +201,7 @@ All session paths first verify the user JWT and the per-user rate limit. There i
 1. **List sessions:** enumerate only `sessions/<hash(user)>/`, reject cross-user bindings, lazily remove expired records, and return non-content metadata with `scope: product | connection` instead of raw match IDs.
 2. **Read a session:** require a currently eligible Cognito tier, load only the user-scoped application-readable session, verify user and scope bindings, freshly reauthorize the match only for a connection-scoped session, apply the current tier's message cap, then return bounded AI turns.
 3. **Delete a session:** validate the user-scoped session ID, delete its private Blob record, release its hashed quota reservation, then return `204`. Deletion remains available after a tier downgrade.
+4. **Account deletion:** on the member's `UserDeleted` event, the erasure worker deletes every blob under `sessions/<hash(user)>/`, the `session-quotas/<hash(user)>.json` index and the member's `chatquota` rows (see [Account deletion](#account-deletion-userdeleted)).
 
 Match-to-match messages never enter this lifecycle. They stay in the app's end-to-end encrypted local store and are shared only as bounded, temporary excerpts for a specific request.
 
@@ -219,7 +234,8 @@ Every signed-in member can chat with Mr OneHook; there is no group or `context.c
 
 **Storage:** Azure Table Storage table `chatquota` in the existing storage account (Terraform, created through ARM with `azapi` because the account has shared keys disabled), one row
 per member (`PartitionKey` = sha256 of the member id, `RowKey` = `daily`) holding `{ day, count }`, overwritten
-when the UTC day changes, so rows never grow and need no cleanup. Increments are read-then-ETag-conditional
+when the UTC day changes, so rows never grow and need no cleanup (a deleted account's rows are removed by
+the [account erasure worker](#account-deletion-userdeleted)). Increments are read-then-ETag-conditional
 writes (insert-if-absent for the first), retried on conflict, so concurrent messages cannot exceed the
 limit. The slot is taken before the model call and released if it fails. The app reaches the table with
 its managed identity and a **Storage Table Data Contributor** role scoped to that one table. If the store
@@ -235,17 +251,28 @@ When a member asks Mr OneHook to find a kind of person, the model adds an option
 
 - **Service:** SigV4 with this service's federated AWS role, `OneHook-MrOneHook-<stage>-Role`. OneHookBackend
   CDK creates the role and the IAM OIDC provider. It trusts only this App Service's managed identity for the
-  audience app registration below, and may invoke only the AI-context and suggestion routes.
+  audience app registration below. It may invoke only the AI-context, matching-status and suggestion routes,
+  and consume the account-erasure queue (see [AWS permissions](#aws-permissions-of-the-mr-onehook-role)).
 - **Member:** the member's own Cognito ID token in `X-OneHook-Member-Token`, inside the signed headers.
   Matching verifies it and takes the member id and tier only from it, so this service can only act for a
   member who is in a live session with it.
+
+**Matching must be ON (chat-only profiles).** A suggestion is matching data about one member: the one whose
+token it carries. Before sending it, the backend reads that member's matching mode from State,
+`GET {ONEHOOK_DATA_API_URL}/state/internal/users/{userId}/matching` (SigV4, same State API and signer as the
+AI-context route; `userId` is the verified token subject). State answers
+`{userId, status: OFF | ON | ERASING, generation}`, and an unknown member reads as `OFF`. The suggestion is
+sent only for `ON`. `OFF` and `ERASING` give `MATCHING_OFF` and nothing is sent. If the status read fails
+(signing, network, non-200, a body for another member or with an unknown status), nothing is sent and the
+status is `UNAVAILABLE` (fail closed). Matching's own `403 MATCHING_OFF` (an opt-out racing the read) also
+maps to `MATCHING_OFF`.
 
 A member has one such suggestion; a new request replaces it, and the member can remove it in their
 preferences. Suggestions are recorded **only from product chats** (no `matchId`): in a connection chat the
 model also sees the other person's messages, which must never plant suggestions in this member's feed.
 
 The chat response includes `matchSuggestion: { status, reasoning }` (`RECORDED`, `PREMIUM_REQUIRED`,
-`UNAVAILABLE`). The prompt is never returned, logged or stored here.
+`MATCHING_OFF`, `UNAVAILABLE`). The prompt is never returned, logged or stored here.
 
 **Federation is code.** The Entra app registration whose identifier URI is the AWS audience is managed by
 Terraform here (`azuread_application_registration.aws_audience`, v1 tokens because the AWS provider
@@ -253,6 +280,62 @@ trusts the `sts.windows.net` issuer); gamma's pre-existing registration is adopt
 `terraform output aws_federation` gives the tenant, audience and managed-identity principal id that
 OneHookBackend `infra/config/mr-onehook.ts` must hold. Applying it needs Entra permissions to manage app
 registrations (Application Administrator, or `Application.ReadWrite.OwnedBy` as an owner).
+
+## Account deletion (UserDeleted)
+
+When a member deletes their account, Profile publishes `UserDeleted` (source `club.onehook.profile`,
+`detail.userId`). An EventBridge rule in the OneHookBackend Matching stack delivers it to the standard SQS
+queue `OneHook-UxErasure-<stage>` (SSE-SQS, visibility timeout 5 minutes, DLQ
+`OneHook-UxErasure-<stage>-DLQ` after 5 receives, with an alarm on the DLQ). The message body is the
+EventBridge event JSON.
+
+A background worker in this App Service (`backend/src/uxErasureWorker.ts`) long-polls the queue (20 s
+waits, AWS SDK v3 `@aws-sdk/client-sqs`) with the same federated role credentials as the SigV4 routes. For
+each message it:
+
+1. deletes every `aisessions` blob of the member: all of `sessions/<sha256(userId)>/` and
+   `session-quotas/<sha256(userId)>.json` (base64url hashes, the same `stableReference` the session store
+   uses), re-listing until the prefix is empty;
+2. deletes the member's `chatquota` partition (`PartitionKey` = hex sha256 of the user id);
+3. deletes the message, only after both succeeded.
+
+| Case | What happens |
+|---|---|
+| Erasure or storage failure | Message left; it is redelivered after the visibility timeout and goes to the DLQ after 5 receives (the 5th failure logs `ux_erasure.failed_final`) |
+| Not JSON, or a UserDeleted without a usable `detail.userId` | Nothing erased; message left so it reaches the DLQ and someone looks at it |
+| A well-formed event that is not a Profile UserDeleted | Nothing erased; message deleted |
+| Redelivery or DLQ redrive | Harmless: erasure is idempotent |
+| `SIGTERM` (App Service stop, restart, deploy) | The pending long poll is aborted and in-flight messages finish (up to 30 s); unfinished ones are redelivered |
+
+At most `UX_ERASURE_CONCURRENCY` (default 4, max 10) messages are processed at once: that is the receive
+batch size, and the next receive waits for the batch. Logs are single-line JSON (`ux_erasure.*`) with the
+SQS message id, receive count, counts and error type only: never a member id, a message body or a blob
+name. The worker runs whether or not `CONTEXTUAL_AI_ENABLED` is on, because data written while the feature
+was on must still be erased. It is off when `UX_ERASURE_QUEUE_URL` is empty, and stays off (with a
+warning) when the session container is not configured, so it never acknowledges a deletion it cannot carry
+out.
+
+Terraform sets `UX_ERASURE_QUEUE_URL` from `ux_erasure_queue_url` in `infra/stages/<stage>.tfvars`. Take the
+value from the Matching stack output `UxErasureQueueUrl`
+(`https://sqs.<region>.amazonaws.com/<account>/OneHook-UxErasure-<stage>`); the role has no
+`sqs:GetQueueUrl`, so the URL is configured directly. prod is empty (worker off) until the prod role and
+queue exist.
+
+## AWS permissions of the Mr OneHook role
+
+`OneHook-MrOneHook-<stage>-Role` is created by OneHookBackend CDK (Matching stack) and assumed through
+`AssumeRoleWithWebIdentity` by this App Service's managed identity only. It holds no long-lived keys and
+may do exactly this:
+
+| Permission | Resource | Used for |
+|---|---|---|
+| `execute-api:Invoke` | State `GET /api/ai-context/matches/*` | AI context for a connection chat |
+| `execute-api:Invoke` | State `GET /state/internal/users/*/matching` | Matching-mode check before a suggestion |
+| `execute-api:Invoke` | Matching `POST /matching/internal/suggestions` | Recording a "find me ..." suggestion |
+| `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`, `sqs:GetQueueAttributes` | `OneHook-UxErasure-<stage>` | Account deletion |
+
+In Azure, the App Service identity has Blob Data Contributor on the `aisessions` container and Table Data
+Contributor on the `chatquota` table, which is what erasure needs; no new Azure role is required.
 
 ## Local Development
 
@@ -301,6 +384,8 @@ npm run dev
 | `AUTH_TIER_CLAIM` | Verified Cognito access-token tier claim; may be `cognito:groups` | `custom:tier` | When session storage is enabled |
 | `CHAT_SESSION_TIER_POLICIES` | JSON map of eligible tiers and server-enforced limits | `{}` | When session storage is enabled |
 | `CHAT_SESSION_MAX_RETENTION_DAYS` | Infrastructure/application retention hard cap | `90` | No |
+| `UX_ERASURE_QUEUE_URL` | SQS queue `OneHook-UxErasure-<stage>` for account deletion; empty turns the erasure worker off | — | For account erasure |
+| `UX_ERASURE_CONCURRENCY` | Erasure messages processed at once (1-10) | `4` | No |
 
 Terraform injects the non-secret production settings. Authentication values remain empty and `contextual_ai_enabled` remains `false` by default; provide reviewed environment-specific Terraform values only after the upstream contracts are ready.
 
@@ -387,11 +472,13 @@ The caller must not send a user ID, profile, or participant list. Identity comes
 
 ```http
 GET {ONEHOOK_DATA_API_URL}/api/ai-context/matches/{matchId}
-Authorization: Bearer <managed-identity-token>
+Authorization: AWS4-HMAC-SHA256 ... (SigV4, OneHook-MrOneHook-<stage>-Role)
 X-OneHook-User-Id: <verified-token-subject>
 ```
 
 The authoritative service must return an active match, bind `requestingUser.id` to that subject, provide only AI-visible profile fields, and return `contextPolicy.profileAllowed`, `contextPolicy.messageHistoryAllowed`, and `contextPolicy.policyVersion`. A block, unmatch, missing consent, or membership failure must be enforced by that service; the AI backend also verifies the returned binding and status.
+
+`displayName` comes from the member's chat profile and is always sent. The matching-profile fields (`pronouns`, `bio`, `interests`, `communicationPreferences`, `relationshipGoals`) are optional: State includes them only when both members' matching profiles are ACTIVE (chat-only profiles). The backend applies the same rule again on receipt and when assembling the prompt: matching fields are used only when both participants carry some, otherwise both are reduced to their display names. Absent fields are never filled in, and the prompt tells the model not to guess them.
 
 When the supplied context is insufficient, the member API may return a bounded local-search request instead of guessing:
 
@@ -734,6 +821,9 @@ OneHookUXEnhancement/
 │   │   ├── contextRoutes.ts           # Authenticated chat and session routes
 │   │   ├── oneHookDataClient.ts       # Authoritative match/profile projection client
 │   │   ├── plaintextChatSessionStore.ts # Tier-gated application-readable AI sessions
+│   │   ├── matchingStatusClient.ts    # State matching-mode read (SigV4) before a suggestion
+│   │   ├── matchingSuggestionClient.ts # Matching suggestion write, gated on matching ON
+│   │   ├── uxErasureWorker.ts         # UserDeleted SQS consumer: erases AI sessions and quota ledger
 │   │   └── __tests__/                 # TypeScript Node test suite
 │   ├── package.json
 │   └── tsconfig.json

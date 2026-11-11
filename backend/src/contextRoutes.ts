@@ -23,7 +23,7 @@ import {
   type OneHookDataClient,
 } from './oneHookDataClient';
 
-interface ContextualServices {
+export interface ContextualServices {
   client: AzureOpenAI;
   /** Free-tier daily message allowance (Azure Table Storage). Paid tiers never use it. */
   chatQuota?: ChatQuota;
@@ -249,10 +249,11 @@ export function createContextualRouter(
         let matchSuggestion: { status: SuggestionStatus; reasoning: string } | undefined;
         if (result.matchSuggestion && !input.matchId) {
           // The member's own token (already verified above) is sent as PROOF of their session; Matching
-          // re-verifies it and derives the member id and tier only from it.
+          // re-verifies it and derives the member id and tier only from it. The verified subject is the
+          // member whose matching mode must be ON before anything is recorded.
           const memberIdToken = (req.headers.authorization ?? '').slice('Bearer '.length).trim();
           const status = await (services.suggestionRecorder ?? disabledSuggestionRecorder)
-            .record(memberIdToken, result.matchSuggestion);
+            .record({ userId: subject, idToken: memberIdToken }, result.matchSuggestion);
           matchSuggestion = { status, reasoning: result.matchSuggestion.reasoning };
           console.info('OneHook suggestion', { requestId, status });
         }

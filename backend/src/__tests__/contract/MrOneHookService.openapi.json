@@ -1,0 +1,1250 @@
+{
+    "openapi": "3.0.2",
+    "info": {
+        "title": "MrOneHookService",
+        "version": "2026-11-01"
+    },
+    "paths": {
+        "/api/member/product-connection-chat": {
+            "post": {
+                "description": "One chat turn with Mr OneHook: a product question, or (with `matchId`) help with one connection.\n\nCodes: 400 `INVALID_CONTEXTUAL_CHAT_REQUEST`; 401 `AUTH_REQUIRED`, `INVALID_ACCESS_TOKEN`; 402\n`MESSAGE_LIMIT_REACHED` (free tier: 10 messages per UTC day); 403 `CHAT_SESSION_NOT_INCLUDED_IN_TIER`,\n`MESSAGE_CONTEXT_NOT_ALLOWED`; 404 `MATCH_NOT_AVAILABLE`, `CHAT_SESSION_NOT_FOUND`,\n`ENDPOINT_NOT_FOUND`; 409 `CHAT_SESSION_LIMIT_REACHED`; 429 `RATE_LIMITED`, `AI_RATE_LIMITED`; 503\n`CONTEXT_NOT_CONFIGURED`, `CHAT_SESSION_STORAGE_NOT_CONFIGURED`, `CHAT_TEMPORARILY_UNAVAILABLE`,\n`CONTEXT_TEMPORARILY_UNAVAILABLE`.",
+                "operationId": "ProductConnectionChat",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProductConnectionChatRequestContent"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "parameters": [
+                    {
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "description": "A UUID makes the turn idempotent: it becomes the `requestId`, and a repeated turn is stored once.\nAnything else is ignored and a new id is minted.",
+                        "schema": {
+                            "type": "string",
+                            "description": "A UUID makes the turn idempotent: it becomes the `requestId`, and a repeated turn is stored once.\nAnything else is ignored and a new id is minted."
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ProductConnectionChat 200 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProductConnectionChatResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "BadRequestError 400 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequestErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "402": {
+                        "description": "MessageLimitReachedError 402 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessageLimitReachedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "ForbiddenError 403 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "ChatSessionLimitReachedError 409 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ChatSessionLimitReachedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/member/product-connection-chat/sessions": {
+            "get": {
+                "description": "The member's saved chat sessions, newest first (expired ones are left out).\n503 `CHAT_SESSION_STORAGE_TEMPORARILY_UNAVAILABLE` when the store cannot be read.",
+                "operationId": "ListChatSessions",
+                "responses": {
+                    "200": {
+                        "description": "ListChatSessions 200 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ListChatSessionsResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/member/product-connection-chat/sessions/{sessionId}": {
+            "delete": {
+                "description": "Deletes a saved session. Idempotent: an unknown UUID is also 204.",
+                "operationId": "DeleteChatSession",
+                "parameters": [
+                    {
+                        "name": "sessionId",
+                        "in": "path",
+                        "description": "UUID.",
+                        "schema": {
+                            "type": "string",
+                            "description": "UUID."
+                        },
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "DeleteChatSession 204 response"
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "get": {
+                "description": "One saved session with its messages (the tier's most recent ones). 404 `CHAT_SESSION_NOT_FOUND` for an\nunknown id, another member's session, or a connection session whose match is no longer visible.",
+                "operationId": "GetChatSession",
+                "parameters": [
+                    {
+                        "name": "sessionId",
+                        "in": "path",
+                        "description": "UUID.",
+                        "schema": {
+                            "type": "string",
+                            "description": "UUID."
+                        },
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "GetChatSession 200 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/GetChatSessionResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "ForbiddenError 403 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/public/product-chat": {
+            "post": {
+                "description": "The anonymous mascot chat on the public site. 10 requests per minute per client IP (429). A\nnon-empty `honeypot` is refused (403). Upstream model errors map to 400 (the model refused the\nrequest), 429 (the model is rate limited) or 503 (any other model error); anything else is 500.",
+                "operationId": "PublicProductChat",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PublicProductChatRequestContent"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "PublicProductChat 200 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PublicProductChatResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "BadRequestError 400 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequestErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "ForbiddenError 403 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": []
+            }
+        },
+        "/health": {
+            "get": {
+                "description": "Liveness probe (App Service health check).",
+                "operationId": "GetHealth",
+                "responses": {
+                    "200": {
+                        "description": "GetHealth 200 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/GetHealthResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": []
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "BadRequestErrorResponseContent": {
+                "type": "object",
+                "description": "Mr OneHook's error body. On member routes `error` is a stable UPPER_SNAKE_CASE code; on the public\nroute it is a human-readable message.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "ChatSessionDetail": {
+                "type": "object",
+                "properties": {
+                    "sessionId": {
+                        "type": "string"
+                    },
+                    "matchId": {
+                        "type": "string",
+                        "description": "Connection sessions only."
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "updatedAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "expiresAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ChatSessionMessage"
+                        }
+                    }
+                },
+                "required": [
+                    "createdAt",
+                    "expiresAt",
+                    "messages",
+                    "sessionId",
+                    "updatedAt"
+                ]
+            },
+            "ChatSessionLimitReachedErrorResponseContent": {
+                "type": "object",
+                "description": "409 `CHAT_SESSION_LIMIT_REACHED`: a new saved session would exceed the tier's cap. Before the model\ncall it lists the sessions so the app can offer a choice; a race at save time carries neither field.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    },
+                    "maxSessions": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "sessions": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ChatSessionSummary"
+                        }
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "ChatSessionMessage": {
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "$ref": "#/components/schemas/ChatSessionRole"
+                    },
+                    "content": {
+                        "type": "string",
+                        "maxLength": 16000,
+                        "minLength": 1
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    }
+                },
+                "required": [
+                    "content",
+                    "createdAt",
+                    "role"
+                ]
+            },
+            "ChatSessionRole": {
+                "type": "string",
+                "enum": [
+                    "user",
+                    "assistant"
+                ]
+            },
+            "ChatSessionScope": {
+                "type": "string",
+                "enum": [
+                    "product",
+                    "connection"
+                ]
+            },
+            "ChatSessionSummary": {
+                "type": "object",
+                "properties": {
+                    "sessionId": {
+                        "type": "string"
+                    },
+                    "scope": {
+                        "$ref": "#/components/schemas/ChatSessionScope"
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "updatedAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "expiresAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "messageCount": {
+                        "type": "integer",
+                        "format": "int32"
+                    }
+                },
+                "required": [
+                    "createdAt",
+                    "expiresAt",
+                    "messageCount",
+                    "scope",
+                    "sessionId",
+                    "updatedAt"
+                ]
+            },
+            "ContextDateRange": {
+                "type": "object",
+                "description": "At least one bound; `from` is not after `to`.",
+                "properties": {
+                    "from": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "to": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    }
+                }
+            },
+            "ContextOptions": {
+                "type": "object",
+                "properties": {
+                    "includeProfile": {
+                        "type": "boolean",
+                        "description": "Default true."
+                    },
+                    "includeMessageHistory": {
+                        "type": "boolean",
+                        "description": "Default true."
+                    }
+                }
+            },
+            "ContextRequest": {
+                "type": "object",
+                "properties": {
+                    "searchTerms": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "maxItems": 8,
+                        "minItems": 1,
+                        "description": "1 to 8 terms, each 1 to 80 characters."
+                    },
+                    "maxMessages": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "1 to `CONTEXT_REQUEST_MAX_MESSAGES` (default 8).",
+                        "format": "int32"
+                    },
+                    "dateRange": {
+                        "$ref": "#/components/schemas/ContextDateRange"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's `requestId`; send it back as `contextRequestId`."
+                    }
+                },
+                "required": [
+                    "maxMessages",
+                    "requestId",
+                    "searchTerms"
+                ]
+            },
+            "ContextUsed": {
+                "type": "object",
+                "description": "Which context went into the answer.",
+                "properties": {
+                    "profile": {
+                        "type": "boolean"
+                    },
+                    "match": {
+                        "type": "boolean"
+                    },
+                    "messageHistory": {
+                        "type": "boolean"
+                    },
+                    "messageCount": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "chatSession": {
+                        "type": "boolean"
+                    },
+                    "sessionMessageCount": {
+                        "type": "integer",
+                        "format": "int32"
+                    }
+                },
+                "required": [
+                    "chatSession",
+                    "match",
+                    "messageCount",
+                    "messageHistory",
+                    "profile",
+                    "sessionMessageCount"
+                ]
+            },
+            "EphemeralMessageContext": {
+                "type": "object",
+                "properties": {
+                    "excerpts": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/EphemeralMessageExcerpt"
+                        },
+                        "minItems": 1,
+                        "description": "1 to `EPHEMERAL_CONTEXT_MAX_MESSAGES` (default 30); total text at most\n`EPHEMERAL_CONTEXT_MAX_CHARACTERS` (default 12000)."
+                    },
+                    "historyTruncated": {
+                        "type": "boolean"
+                    },
+                    "userConfirmed": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "excerpts"
+                ]
+            },
+            "EphemeralMessageExcerpt": {
+                "type": "object",
+                "properties": {
+                    "speaker": {
+                        "$ref": "#/components/schemas/ExcerptSpeaker"
+                    },
+                    "sentAt": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "description": "ISO-8601, at most 5 minutes in the future."
+                    },
+                    "text": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "sentAt",
+                    "speaker",
+                    "text"
+                ]
+            },
+            "ExcerptSpeaker": {
+                "type": "string",
+                "enum": [
+                    "self",
+                    "match"
+                ]
+            },
+            "ForbiddenErrorResponseContent": {
+                "type": "object",
+                "description": "Mr OneHook's error body. On member routes `error` is a stable UPPER_SNAKE_CASE code; on the public\nroute it is a human-readable message.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "GetChatSessionResponseContent": {
+                "type": "object",
+                "properties": {
+                    "session": {
+                        "$ref": "#/components/schemas/ChatSessionDetail"
+                    }
+                },
+                "required": [
+                    "session"
+                ]
+            },
+            "GetHealthResponseContent": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Always `ok`."
+                    },
+                    "timestamp": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    }
+                },
+                "required": [
+                    "status",
+                    "timestamp"
+                ]
+            },
+            "InternalServerErrorResponseContent": {
+                "type": "object",
+                "description": "Mr OneHook's error body. On member routes `error` is a stable UPPER_SNAKE_CASE code; on the public\nroute it is a human-readable message.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "ListChatSessionsResponseContent": {
+                "type": "object",
+                "properties": {
+                    "sessions": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ChatSessionSummary"
+                        }
+                    }
+                },
+                "required": [
+                    "sessions"
+                ]
+            },
+            "MatchSuggestionResult": {
+                "type": "object",
+                "description": "What happened to a \"find me ...\" request. The prompt Mr OneHook wrote is never returned.",
+                "properties": {
+                    "status": {
+                        "$ref": "#/components/schemas/SuggestionStatus"
+                    },
+                    "reasoning": {
+                        "type": "string",
+                        "maxLength": 280,
+                        "minLength": 1,
+                        "description": "Why Mr OneHook is suggesting these people (1 to 280 characters)."
+                    }
+                },
+                "required": [
+                    "reasoning",
+                    "status"
+                ]
+            },
+            "MessageLimitReachedErrorResponseContent": {
+                "type": "object",
+                "description": "402 `MESSAGE_LIMIT_REACHED`: the free tier's daily messages are spent.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    },
+                    "remainingMessages": {
+                        "type": "integer",
+                        "description": "Always 0.",
+                        "format": "int32"
+                    }
+                },
+                "required": [
+                    "error",
+                    "remainingMessages"
+                ]
+            },
+            "Mood": {
+                "type": "string",
+                "description": "Mr OneHook's mood, which drives the mascot's face.",
+                "enum": [
+                    "Happy",
+                    "Neutral",
+                    "Thinking",
+                    "Sad",
+                    "Excited"
+                ]
+            },
+            "NotFoundErrorResponseContent": {
+                "type": "object",
+                "description": "Mr OneHook's error body. On member routes `error` is a stable UPPER_SNAKE_CASE code; on the public\nroute it is a human-readable message.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "PayloadTooLargeErrorResponseContent": {
+                "type": "object",
+                "description": "413 `PAYLOAD_TOO_LARGE`: the JSON body is over 32 KB.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "ProductConnectionChatRequestContent": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "1 to `CONTEXT_MAX_INPUT_CHARACTERS` (default 4000) characters; trimmed, must not be blank."
+                    },
+                    "matchId": {
+                        "type": "string",
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "description": "Present: a connection chat about this match (1 to 256 characters). Absent: a product chat."
+                    },
+                    "contextOptions": {
+                        "$ref": "#/components/schemas/ContextOptions"
+                    },
+                    "ephemeralMessageContext": {
+                        "$ref": "#/components/schemas/EphemeralMessageContext"
+                    },
+                    "contextRequestId": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "description": "UUID of a `contextRequest` this turn answers."
+                    },
+                    "sessionOptions": {
+                        "$ref": "#/components/schemas/SessionOptions"
+                    }
+                },
+                "required": [
+                    "message"
+                ]
+            },
+            "ProductConnectionChatResponseContent": {
+                "type": "object",
+                "properties": {
+                    "reply": {
+                        "type": "string",
+                        "description": "1 to 8000 characters."
+                    },
+                    "mood": {
+                        "$ref": "#/components/schemas/Mood"
+                    },
+                    "needsMoreContext": {
+                        "type": "boolean",
+                        "description": "Connection chats only: Mr OneHook needs more of the conversation; `contextRequest` says what."
+                    },
+                    "contextRequest": {
+                        "$ref": "#/components/schemas/ContextRequest"
+                    },
+                    "remainingMessages": {
+                        "type": "integer",
+                        "description": "Free tier only: messages left today after this one.",
+                        "format": "int32"
+                    },
+                    "matchSuggestion": {
+                        "$ref": "#/components/schemas/MatchSuggestionResult"
+                    },
+                    "contextUsed": {
+                        "$ref": "#/components/schemas/ContextUsed"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "UUID of this turn."
+                    },
+                    "session": {
+                        "$ref": "#/components/schemas/SavedSessionRef"
+                    }
+                },
+                "required": [
+                    "contextUsed",
+                    "mood",
+                    "reply",
+                    "requestId"
+                ]
+            },
+            "PublicChatMessage": {
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "$ref": "#/components/schemas/PublicChatRole"
+                    },
+                    "content": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "content",
+                    "role"
+                ]
+            },
+            "PublicChatRole": {
+                "type": "string",
+                "enum": [
+                    "system",
+                    "user",
+                    "assistant"
+                ]
+            },
+            "PublicProductChatRequestContent": {
+                "type": "object",
+                "properties": {
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PublicChatMessage"
+                        },
+                        "description": "The conversation so far; the last message is the visitor's."
+                    },
+                    "userDemographics": {
+                        "$ref": "#/components/schemas/UserDemographics"
+                    },
+                    "honeypot": {
+                        "type": "string",
+                        "description": "Bot trap: must be absent or empty."
+                    }
+                },
+                "required": [
+                    "messages"
+                ]
+            },
+            "PublicProductChatResponseContent": {
+                "type": "object",
+                "properties": {
+                    "reply": {
+                        "type": "string"
+                    },
+                    "mood": {
+                        "$ref": "#/components/schemas/Mood"
+                    }
+                },
+                "required": [
+                    "mood",
+                    "reply"
+                ]
+            },
+            "SavedSessionRef": {
+                "type": "object",
+                "properties": {
+                    "sessionId": {
+                        "type": "string"
+                    },
+                    "updatedAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "expiresAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "messageCount": {
+                        "type": "integer",
+                        "format": "int32"
+                    }
+                },
+                "required": [
+                    "expiresAt",
+                    "messageCount",
+                    "sessionId",
+                    "updatedAt"
+                ]
+            },
+            "ServiceUnavailableErrorResponseContent": {
+                "type": "object",
+                "description": "Mr OneHook's error body. On member routes `error` is a stable UPPER_SNAKE_CASE code; on the public\nroute it is a human-readable message.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "SessionOptions": {
+                "type": "object",
+                "description": "Saving the conversation needs a paid tier (403 `CHAT_SESSION_NOT_INCLUDED_IN_TIER` otherwise).",
+                "properties": {
+                    "persist": {
+                        "type": "boolean",
+                        "description": "Start a saved session."
+                    },
+                    "sessionId": {
+                        "type": "string",
+                        "description": "Continue this saved session (UUID). Cannot be combined with `persist: false`."
+                    },
+                    "replaceLeastRecent": {
+                        "type": "boolean",
+                        "description": "At the tier's session cap, delete the least recently active session instead of answering 409."
+                    }
+                }
+            },
+            "SuggestionStatus": {
+                "type": "string",
+                "enum": [
+                    "RECORDED",
+                    "PREMIUM_REQUIRED",
+                    "MATCHING_OFF",
+                    "UNAVAILABLE"
+                ]
+            },
+            "TooManyRequestsErrorResponseContent": {
+                "type": "object",
+                "description": "Mr OneHook's error body. On member routes `error` is a stable UPPER_SNAKE_CASE code; on the public\nroute it is a human-readable message.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "UnauthorizedErrorResponseContent": {
+                "type": "object",
+                "description": "Mr OneHook's error body. On member routes `error` is a stable UPPER_SNAKE_CASE code; on the public\nroute it is a human-readable message.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "UserDemographics": {
+                "type": "object",
+                "properties": {
+                    "gender": {
+                        "type": "string"
+                    },
+                    "sexualPreference": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "securitySchemes": {
+            "smithy.api.httpBearerAuth": {
+                "type": "http",
+                "description": "HTTP Bearer authentication",
+                "scheme": "Bearer"
+            }
+        }
+    },
+    "security": [
+        {
+            "smithy.api.httpBearerAuth": []
+        }
+    ]
+}

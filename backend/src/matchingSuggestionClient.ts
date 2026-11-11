@@ -1,4 +1,5 @@
 import type { RequestSigner } from './oneHookDataClient';
+import type { MatchingStatusReader } from './matchingStatusClient';
 
 /**
  * Records a member's OneHook suggestion in the OneHook Matching service (AWS).
@@ -11,19 +12,31 @@ import type { RequestSigner } from './oneHookDataClient';
  *    verifies it and takes the member id and tier ONLY from it.
  * So this service can only record a suggestion for a member who is in a live session with it, never name
  * a member itself. The member's suggestion is replaced by a newer one; Matching enforces Super+.
+ *
+ * A suggestion is matching data about exactly one member, the one whose token it carries. Before sending
+ * it, the client reads that member's matching mode from State and records only when it is ON (chat-only
+ * profiles, design §8.6). OFF, ERASING and an unknown member are `MATCHING_OFF`; a failed status read is
+ * `UNAVAILABLE` and nothing is sent (fail closed).
  * The prompt is never logged.
  */
 
-export type SuggestionStatus = 'RECORDED' | 'PREMIUM_REQUIRED' | 'UNAVAILABLE';
+export type SuggestionStatus = 'RECORDED' | 'PREMIUM_REQUIRED' | 'MATCHING_OFF' | 'UNAVAILABLE';
 
 export interface MatchSuggestion {
   prompt: string;
   reasoning: string;
 }
 
+/** The member a suggestion is for, as verified from their own token. */
+export interface SuggestionMember {
+  /** Verified token subject (the OneHook user id); used for the matching-status check. */
+  userId: string;
+  /** The member's verified Cognito ID token (proof of their session); Matching derives the member from it. */
+  idToken: string;
+}
+
 export interface SuggestionRecorder {
-  /** @param memberIdToken the member's verified Cognito ID token (proof of their session) */
-  record(memberIdToken: string, suggestion: MatchSuggestion): Promise<SuggestionStatus>;
+  record(member: SuggestionMember, suggestion: MatchSuggestion): Promise<SuggestionStatus>;
 }
 
 export const SUGGESTION_PROMPT_MIN = 3;
@@ -52,11 +65,19 @@ export class MatchingSuggestionClient implements SuggestionRecorder {
     private readonly baseUrl: string,
     private readonly signer: RequestSigner,
     private readonly timeoutMs: number,
+    private readonly matchingStatus: MatchingStatusReader,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async record(memberIdToken: string, suggestion: MatchSuggestion): Promise<SuggestionStatus> {
-    if (!memberIdToken) return 'UNAVAILABLE';
+  async record(member: SuggestionMember, suggestion: MatchSuggestion): Promise<SuggestionStatus> {
+    if (!member.idToken || !member.userId) return 'UNAVAILABLE';
+    try {
+      const { status } = await this.matchingStatus.get(member.userId);
+      if (status !== 'ON') return 'MATCHING_OFF';
+    } catch {
+      // Could not confirm matching is ON: record nothing.
+      return 'UNAVAILABLE';
+    }
     const url = new URL(`${this.baseUrl}/matching/internal/suggestions`);
     const body = JSON.stringify(suggestion);
     let response: Response;
@@ -67,7 +88,7 @@ export class MatchingSuggestionClient implements SuggestionRecorder {
         headers: {
           'content-type': 'application/json',
           accept: 'application/json',
-          'x-onehook-member-token': memberIdToken,
+          'x-onehook-member-token': member.idToken,
         },
         body,
       });
@@ -83,9 +104,13 @@ export class MatchingSuggestionClient implements SuggestionRecorder {
     }
     if (response.status === 200 || response.status === 201) return 'RECORDED';
     if (response.status === 403) {
-      // 403 is either PREMIUM_REQUIRED (tier gate) or an IAM denial; only the former carries that code.
-      const code = await response.json().then((b: unknown) => (b as { error?: unknown })?.error).catch(() => undefined);
-      return code === 'PREMIUM_REQUIRED' ? 'PREMIUM_REQUIRED' : 'UNAVAILABLE';
+      // 403 is PREMIUM_REQUIRED (tier gate), MATCHING_OFF (Matching holds no row for the member, e.g. an
+      // opt-out raced the status read) or an IAM denial; only the first two carry a code. OneHook errors are
+      // `{error: <human message>, code: <MACHINE_CODE>}`: the code is `code`, never `error`.
+      const code = await response.json().then((b: unknown) => (b as { code?: unknown })?.code).catch(() => undefined);
+      if (code === 'PREMIUM_REQUIRED') return 'PREMIUM_REQUIRED';
+      if (code === 'MATCHING_OFF') return 'MATCHING_OFF';
+      return 'UNAVAILABLE';
     }
     return 'UNAVAILABLE';
   }

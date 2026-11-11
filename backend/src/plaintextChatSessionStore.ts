@@ -295,6 +295,37 @@ export class PlaintextChatSessionStore {
     await this.releaseSession(subject, sessionId);
   }
 
+  /**
+   * Account deletion: removes every blob this store keeps for the member, i.e. all session records under
+   * `sessions/<hash(subject)>/` and the `session-quotas/<hash(subject)>.json` index. Blob names are
+   * derived with the same {@link stableReference} hash as every other path, so nothing else is needed.
+   * Idempotent; deleting what is already gone is a no-op. A session written while erasure runs (a token
+   * still valid for a few minutes) is caught by re-listing until the prefix is empty. Throws on any
+   * storage failure so the caller can retry. Returns the number of blobs removed.
+   */
+  async eraseUser(subject: string): Promise<number> {
+    const userRef = stableReference(subject);
+    const prefix = `sessions/${userRef}/`;
+    let removed = 0;
+    const list = async (): Promise<string[]> => {
+      const names: string[] = [];
+      for await (const blobItem of this.container.listBlobsFlat({ prefix })) names.push(blobItem.name);
+      return names;
+    };
+    for (let pass = 0; pass < 3; pass += 1) {
+      const names = await list();
+      for (const name of names) {
+        if ((await this.container.getBlockBlobClient(name).deleteIfExists()).succeeded) removed += 1;
+      }
+      if ((await this.container.getBlockBlobClient(this.quotaBlobName(subject)).deleteIfExists()).succeeded) {
+        removed += 1;
+      }
+      if (names.length === 0) return removed;
+    }
+    if ((await list()).length > 0) throw new Error('Session blobs reappeared during erasure');
+    return removed;
+  }
+
   async appendExchange(input: {
     subject: string;
     matchId?: string;

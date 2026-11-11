@@ -55,7 +55,8 @@ test('OneHookDataClient.withSigner sends signed headers and parses the active-ma
   assert.equal(sentHeaders['x-onehook-user-id'], 'user-1');
   assert.equal(result.matchId, 'match-1');
   assert.equal(result.status, 'active');
-  assert.deepEqual(result.requestingUser, { displayName: 'Ada', interests: ['logic'] });
+  // One-sided matching fields (only Ada has interests) never reach the model: both drop to display names.
+  assert.deepEqual(result.requestingUser, { displayName: 'Ada' });
   assert.deepEqual(result.matchedUser, { displayName: 'Grace' });
   assert.equal(result.profileAllowed, true);
   assert.equal(result.messageHistoryAllowed, true);
@@ -64,7 +65,7 @@ test('OneHookDataClient.withSigner sends signed headers and parses the active-ma
 
 test('404 from the AWS_IAM route maps to a match-access error, not an outage', async () => {
   const signer = new SigV4RequestSigner('ap-south-1', 'execute-api', testCredentials);
-  const fetchImpl = (async () => new Response('{"error":"Match not found"}', {
+  const fetchImpl = (async () => new Response('{"error":"Match not found","code":"NOT_FOUND"}', {
     status: 404, headers: { 'content-type': 'application/json' },
   })) as unknown as typeof fetch;
   const client = OneHookDataClient.withSigner('https://api.gamma.onehook.club', signer, 2000, fetchImpl);

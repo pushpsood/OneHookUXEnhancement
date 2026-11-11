@@ -1,51 +1,40 @@
-import express, { Request, Response, NextFunction } from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import { AzureOpenAI } from 'openai';
 import { DefaultAzureCredential, getBearerTokenProvider } from '@azure/identity';
 import { BlobServiceClient } from '@azure/storage-blob';
 import { loadContextualFeatureConfig } from './contextConfig';
-import { createContextualRouter } from './contextRoutes';
+import type { ContextualServices } from './contextRoutes';
+import { createApp } from './app';
 import { PlaintextChatSessionStore } from './plaintextChatSessionStore';
 import { OneHookDataClient, type RequestSigner } from './oneHookDataClient';
 import { MatchingSuggestionClient } from './matchingSuggestionClient';
+import { MatchingStatusClient } from './matchingStatusClient';
 import { TableClient } from '@azure/data-tables';
 import { TableChatQuota } from './chatQuota';
 import { SigV4RequestSigner } from './sigv4Signer';
 import { createAzureWebIdentityCredentialProvider } from './azureAwsCredentials';
-import { parseContextualModelResponse } from './contextPrompt';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { SQSClient } from '@aws-sdk/client-sqs';
+import type { AwsCredentialIdentityProvider } from '@smithy/types';
+import {
+  SqsErasureQueue,
+  UxErasureWorker,
+  createUserDataEraser,
+  loadUxErasureConfig,
+} from './uxErasureWorker';
 
 const credential = new DefaultAzureCredential();
 
 dotenv.config();
 
-const app = express();
 const corsAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
-app.use(cors(corsAllowedOrigins.length > 0 ? { origin: corsAllowedOrigins } : undefined));
-app.use(express.json({ limit: '32kb' }));
 
-// In-memory data stores for Rate Limiting and Caching
-interface RateLimitData {
-  count: number;
-  expiry: number;
-}
-const rateLimitMap = new Map<string, RateLimitData>();
-
+// In-memory cache for the product context
 let cachedGithubContext: string | null = null;
 let cachedGithubContextTimestamp = 0;
-
-// Cleanup old rate limit entries every minute to prevent memory leaks
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, data] of rateLimitMap.entries()) {
-    if (now > data.expiry) {
-      rateLimitMap.delete(ip);
-    }
-  }
-}, 60000);
 
 // OpenAI Setup
 const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
@@ -78,6 +67,28 @@ if (storageAccountName) {
 
 // Authenticated product/connection context is isolated from anonymous chat and disabled by default.
 const contextualConfig = loadContextualFeatureConfig();
+
+// AWS credentials for every OneHook AWS call (SigV4 routes and the erasure queue).
+// Cross-cloud: exchange the Azure managed-identity token for OneHook-MrOneHook-<stage>-Role credentials via
+// STS AssumeRoleWithWebIdentity. No long-lived AWS keys live on the App Service. Without a role ARN and
+// audience, the ambient AWS provider chain (env/web-identity file/instance role) is used.
+const awsCredentials: AwsCredentialIdentityProvider = contextualConfig.oneHookDataApiAwsRoleArn
+  && contextualConfig.oneHookDataApiAwsWebIdentityAudience
+  ? createAzureWebIdentityCredentialProvider({
+      credential,
+      audience: contextualConfig.oneHookDataApiAwsWebIdentityAudience,
+      roleArn: contextualConfig.oneHookDataApiAwsRoleArn,
+      region: contextualConfig.oneHookDataApiAwsRegion,
+    })
+  : fromNodeProviderChain();
+
+// Free-tier daily message counters (the quota ledger), shared by the chat route and account erasure.
+const chatQuota = contextualConfig.chatQuotaTableName && storageAccountName
+  ? new TableChatQuota(new TableClient(
+      `https://${storageAccountName}.table.core.windows.net`, contextualConfig.chatQuotaTableName, credential))
+  : undefined;
+
+let contextualServices: ContextualServices | undefined;
 if (contextualConfig.ready && blobServiceClient) {
   const sessionContainer = blobServiceClient.getContainerClient(contextualConfig.sessionContainerName);
   const sessionStore = new PlaintextChatSessionStore(sessionContainer);
@@ -85,49 +96,27 @@ if (contextualConfig.ready && blobServiceClient) {
     console.warn('[WARN] Chat session storage is enabled but unavailable:', contextualConfig.sessionMissing.join(', '));
   }
   // The OneHook AWS routes are AWS_IAM only, so every call is SigV4-signed.
-  let dataApiSigner: RequestSigner;
-  if (
-    contextualConfig.oneHookDataApiAwsRoleArn
-    && contextualConfig.oneHookDataApiAwsWebIdentityAudience
-  ) {
-    // Cross-cloud: exchange the Azure managed-identity token for AWS credentials via STS
-    // AssumeRoleWithWebIdentity, then SigV4-sign. No long-lived AWS keys live on the App Service.
-    const awsCredentials = createAzureWebIdentityCredentialProvider({
-      credential,
-      audience: contextualConfig.oneHookDataApiAwsWebIdentityAudience,
-      roleArn: contextualConfig.oneHookDataApiAwsRoleArn,
-      region: contextualConfig.oneHookDataApiAwsRegion,
-    });
-    dataApiSigner = new SigV4RequestSigner(
-      contextualConfig.oneHookDataApiAwsRegion,
-      contextualConfig.oneHookDataApiAwsService,
-      awsCredentials,
-    );
-  } else {
-    // Fall back to the ambient AWS provider chain (env/web-identity file/instance role).
-    dataApiSigner = new SigV4RequestSigner(
-      contextualConfig.oneHookDataApiAwsRegion,
-      contextualConfig.oneHookDataApiAwsService,
-    );
-  }
+  const dataApiSigner: RequestSigner = new SigV4RequestSigner(
+    contextualConfig.oneHookDataApiAwsRegion,
+    contextualConfig.oneHookDataApiAwsService,
+    awsCredentials,
+  );
   const dataClient = OneHookDataClient.withSigner(
     contextualConfig.oneHookDataApiUrl,
     dataApiSigner,
     contextualConfig.dataApiTimeoutMs,
   );
   // Suggestions go to Matching's IAM-only route, so they need the SigV4 signer (federated AWS role).
+  // Each one is recorded only after State confirms the member's matching is ON (same State API and signer
+  // as the AI-context route).
   const suggestionsEnabled = Boolean(contextualConfig.oneHookMatchingApiUrl);
   if (!suggestionsEnabled) {
     console.warn('[WARN] OneHook suggestions are off (needs ONEHOOK_MATCHING_API_URL)');
   }
   // Free-tier daily message counters (Azure Table Storage, managed identity). Missing config means free
   // members get 503 (never unlimited); paid members are unaffected.
-  const chatQuota = contextualConfig.chatQuotaTableName && storageAccountName
-    ? new TableChatQuota(new TableClient(
-        `https://${storageAccountName}.table.core.windows.net`, contextualConfig.chatQuotaTableName, credential))
-    : undefined;
   if (!chatQuota) console.warn('[WARN] AZURE_CHAT_QUOTA_TABLE is not set; free members cannot chat');
-  app.use(createContextualRouter(contextualConfig, {
+  contextualServices = {
     client,
     deployment,
     dataClient,
@@ -135,52 +124,55 @@ if (contextualConfig.ready && blobServiceClient) {
     ...(suggestionsEnabled
       ? {
           suggestionRecorder: new MatchingSuggestionClient(
-            contextualConfig.oneHookMatchingApiUrl, dataApiSigner, contextualConfig.dataApiTimeoutMs),
+            contextualConfig.oneHookMatchingApiUrl,
+            dataApiSigner,
+            contextualConfig.dataApiTimeoutMs,
+            new MatchingStatusClient(contextualConfig.oneHookDataApiUrl, dataApiSigner, contextualConfig.dataApiTimeoutMs),
+          ),
         }
       : {}),
     sessionStore,
     productContextProvider: fetchGitHubContext,
-  }));
-} else {
-  if (contextualConfig.enabled) {
-    console.warn('[WARN] Contextual AI is enabled but unavailable because required settings are missing:', contextualConfig.missing.join(', '));
-  }
-  app.use(createContextualRouter(contextualConfig));
+  };
+} else if (contextualConfig.enabled) {
+  console.warn('[WARN] Contextual AI is enabled but unavailable because required settings are missing:', contextualConfig.missing.join(', '));
 }
 
-// Rate Limiter middleware (In-Memory)
-const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
-  const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'unknown';
-  const limit = 10; // max 10 requests
-  const windowMs = 60 * 1000; // 60 seconds
-  const now = Date.now();
+// Every route (MrOneHookService), middleware and error handler; see app.ts.
+const app = createApp({
+  corsAllowedOrigins,
+  contextualConfig,
+  ...(contextualServices ? { contextualServices } : {}),
+  publicChat: { client, deployment, productContextProvider: fetchGitHubContext },
+});
 
-  if (!rateLimitMap.has(ip)) {
-    rateLimitMap.set(ip, { count: 1, expiry: now + windowMs });
+// Mr OneHook account deletion: consume UserDeleted from OneHook-UxErasure-<stage> and delete the member's
+// AI sessions and quota ledger (design §8.6). Independent of CONTEXTUAL_AI_ENABLED: data written while the
+// feature was on must still be erased. Off when UX_ERASURE_QUEUE_URL is empty. Without the session
+// container it stays off rather than acknowledge deletions it cannot carry out.
+const erasureConfig = loadUxErasureConfig();
+let erasureWorker: UxErasureWorker | undefined;
+if (erasureConfig.problems.length > 0) {
+  console.warn('[WARN] Account erasure worker is off:', erasureConfig.problems.join(', '));
+} else if (erasureConfig.configured) {
+  if (!blobServiceClient || !contextualConfig.sessionContainerName) {
+    console.warn('[WARN] Account erasure worker is off: needs AZURE_STORAGE_ACCOUNT and AZURE_SESSION_CONTAINER');
   } else {
-    const data = rateLimitMap.get(ip)!;
-    if (now > data.expiry) {
-      // Reset if window has passed
-      rateLimitMap.set(ip, { count: 1, expiry: now + windowMs });
-    } else {
-      data.count += 1;
-      if (data.count > limit) {
-        res.status(429).json({ error: 'Too many requests, slow down.' });
-        return;
-      }
-    }
+    if (!chatQuota) console.warn('[WARN] AZURE_CHAT_QUOTA_TABLE is not set; account erasure skips the quota ledger');
+    erasureWorker = new UxErasureWorker({
+      queue: new SqsErasureQueue(
+        new SQSClient({ region: erasureConfig.region, credentials: awsCredentials }),
+        erasureConfig.queueUrl,
+      ),
+      eraser: createUserDataEraser(
+        new PlaintextChatSessionStore(blobServiceClient.getContainerClient(contextualConfig.sessionContainerName)),
+        chatQuota,
+      ),
+      concurrency: erasureConfig.concurrency,
+    });
+    erasureWorker.start();
   }
-  next();
-};
-
-// Fake request detection (Basic honeypot/heuristic check)
-const botDetector = (req: Request, res: Response, next: NextFunction) => {
-  if (req.body.honeypot && req.body.honeypot.length > 0) {
-    res.status(403).json({ error: 'Bot detected.' });
-    return;
-  }
-  next();
-};
+}
 
 // Helper function for streams
 async function streamToString(readableStream: NodeJS.ReadableStream): Promise<string> {
@@ -229,116 +221,21 @@ async function fetchGitHubContext(query: string): Promise<string> {
   return cachedGithubContext!;
 }
 
-// Health check endpoint for Azure App Service probes
-app.get('/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-interface ChatMessage {
-    role: "system" | "user" | "assistant";
-    content: string;
-}
-
-interface ChatRequestBody {
-    messages?: ChatMessage[];
-    userDemographics?: {
-        gender?: string;
-        sexualPreference?: string;
-    };
-    honeypot?: string;
-}
-
-app.post('/api/public/product-chat', rateLimiter, botDetector, async (req: Request<{}, {}, ChatRequestBody>, res: Response) => {
-  try {
-    const { messages, userDemographics } = req.body;
-
-    if (!messages || !Array.isArray(messages)) {
-      res.status(400).json({ error: 'Invalid messages array.' });
-      return;
-    }
-
-    const lastMessage = messages[messages.length - 1];
-    const githubContext = await fetchGitHubContext(lastMessage ? lastMessage.content : "");
-
-    const systemPrompt = `You are the OneHook Alien Mascot, a friendly, helpful, and slightly quirky assistant for OneHook.
-You answer questions ONLY related to business understanding, onboarding, and the platform's value proposition.
-If the user asks about low-level system details, coding implementations, or infrastructure, politely decline and steer them back to business topics.
-You have access to this context from our GitHub repositories:
-${githubContext}
-
-User Demographics for Personalization:
-${userDemographics ? `Gender: ${userDemographics.gender}, Preference: ${userDemographics.sexualPreference || 'Not provided'}` : 'None provided'}
-Tailor your tone to be respectful, personalized, and engaging based on these demographics if applicable.
-
-You must output a JSON object containing:
-1. "reply": Your text response to the user.
-2. "mood": The mood of the conversation to control your facial expression. Choose from: ["Happy", "Neutral", "Thinking", "Sad", "Excited"].
-
-Ensure the output is strictly valid JSON.`;
-
-    const apiMessages: ChatMessage[] = [
-      { role: 'system', content: systemPrompt },
-      ...messages
-    ];
-
-    const result = await client.chat.completions.create({
-      messages: apiMessages,
-      model: deployment,
-      response_format: { type: "json_object" }
-    });
-
-    const responseText = result.choices[0]?.message?.content;
-    if (responseText) {
-        const { reply, mood } = parseContextualModelResponse(responseText);
-        res.json({ reply, mood });
-    } else {
-        throw new Error("No response content");
-    }
-
-  } catch (error: any) {
-    console.error('Chatbot error', {
-      errorType: error instanceof Error ? error.name : 'UnknownError',
-      status: typeof error?.status === 'number' ? error.status : undefined,
-    });
-    
-    if (error.status) {
-      if (error.status === 429) {
-        res.status(429).json({ error: 'The AI is currently handling too many requests. Please try again in a moment.' });
-        return;
-      }
-      if (error.status === 400) {
-        res.status(400).json({ error: 'The request was rejected by the AI model. Please modify your message and try again.' });
-        return;
-      }
-      res.status(error.status).json({ error: 'The AI service is temporarily unavailable.' });
-      return;
-    }
-
-    res.status(500).json({ error: 'An internal error occurred while connecting to the AI.' });
-  }
-});
-
-// 404 Handler for unknown API routes
-app.use((req: Request, res: Response) => {
-  res.status(404).json({ error: 'Endpoint not found.' });
-});
-
-// Global Error Handler for uncaught exceptions and JSON parse errors
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('Unhandled request error', {
-    errorType: err instanceof Error ? err.name : 'UnknownError',
-  });
-  
-  // Handle express.json() SyntaxError (malformed JSON body)
-  if (err instanceof SyntaxError && 'body' in err) {
-    res.status(400).json({ error: 'Invalid JSON payload format.' });
-    return;
-  }
-  
-  res.status(500).json({ error: 'An unexpected internal server error occurred.' });
-});
-
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Chatbot Backend running on port ${PORT}`);
 });
+
+// App Service sends SIGTERM on stop, restart and deploy: stop taking queue messages, let in-flight
+// erasures finish (unfinished ones are redelivered), then stop the HTTP server.
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.info(`Received ${signal}; shutting down`);
+  setTimeout(() => process.exit(0), 40_000).unref();
+  await erasureWorker?.stop(30_000);
+  server.close(() => process.exit(0));
+}
+process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+process.on('SIGINT', () => { void shutdown('SIGINT'); });

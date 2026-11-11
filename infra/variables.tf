@@ -143,9 +143,20 @@ variable "onehook_data_api_aws_region" {
 }
 
 variable "onehook_data_api_aws_role_arn" {
-  description = "ARN of OneHook-MrOneHook-<stage>-Role (OneHookBackend Matching stack output MrOneHookRoleArn). The App Service managed identity assumes it via STS web-identity to call the AI-context and internal suggestion routes. Empty disables the cross-cloud exchange."
+  description = "ARN of OneHook-MrOneHook-<stage>-Role (OneHookBackend Matching stack output MrOneHookRoleArn). The App Service managed identity assumes it via STS web-identity to call the AI-context, matching-status and internal suggestion routes and to poll the UxErasure queue. Empty disables the cross-cloud exchange."
   type        = string
   default     = ""
+}
+
+variable "ux_erasure_queue_url" {
+  description = "URL of the SQS queue OneHook-UxErasure-<stage> (OneHookBackend Matching stack output UxErasureQueueUrl). Mr OneHook long-polls it for UserDeleted and erases the member's AI sessions and quota ledger. The role has no sqs:GetQueueUrl, so the URL is configured directly. Empty disables the erasure worker."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ux_erasure_queue_url == "" || can(regex("^https://sqs\\.[a-z0-9-]+\\.amazonaws\\.com/[0-9]{12}/OneHook-UxErasure-[a-z0-9]+$", var.ux_erasure_queue_url))
+    error_message = "ux_erasure_queue_url must be empty or https://sqs.<region>.amazonaws.com/<account>/OneHook-UxErasure-<stage>."
+  }
 }
 
 variable "aws_federation_enabled" {

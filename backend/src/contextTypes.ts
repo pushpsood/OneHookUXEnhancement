@@ -36,13 +36,30 @@ export interface ContextualChatInput {
   sessionId?: string;
 }
 
-export interface AiVisibleProfile {
-  displayName?: string;
+/**
+ * Profile fields that come from a member's MATCHING profile. State sends them only while BOTH members'
+ * matching profiles are ACTIVE (chat-only profiles, design §8.6); otherwise a participant carries only
+ * `displayName`. Every one of them is optional and is never filled in or guessed here.
+ */
+export const MATCHING_PROFILE_FIELDS = [
+  'pronouns',
+  'bio',
+  'interests',
+  'communicationPreferences',
+  'relationshipGoals',
+] as const;
+
+export interface MatchingProfileFields {
   pronouns?: string;
   bio?: string;
   interests?: string[];
   communicationPreferences?: string[];
   relationshipGoals?: string[];
+}
+
+/** What the AI may see about one participant: the chat-profile display name, plus optional matching fields. */
+export interface AiVisibleProfile extends MatchingProfileFields {
+  displayName?: string;
 }
 
 export interface AiVisibleMatchContext {

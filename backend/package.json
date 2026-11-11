@@ -16,6 +16,7 @@
   "type": "commonjs",
   "dependencies": {
     "@aws-crypto/sha256-js": "5.2.0",
+    "@aws-sdk/client-sqs": "3.1149.0",
     "@aws-sdk/client-sts": "3.1149.0",
     "@aws-sdk/credential-providers": "3.1149.0",
     "@azure/data-tables": "^13.3.2",

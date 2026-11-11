@@ -1,4 +1,4 @@
-import type { AiVisibleMatchContext, AiVisibleProfile } from './contextTypes';
+import { MATCHING_PROFILE_FIELDS, type AiVisibleMatchContext, type AiVisibleProfile } from './contextTypes';
 
 /**
  * Produces the authorization headers for a single outbound request to the authoritative OneHook
@@ -27,14 +27,7 @@ export interface RequestSigner {
 export class MatchContextUnavailableError extends Error {}
 export class MatchContextAccessError extends Error {}
 
-const ALLOWED_PROFILE_FIELDS = new Set([
-  'displayName',
-  'pronouns',
-  'bio',
-  'interests',
-  'communicationPreferences',
-  'relationshipGoals',
-]);
+const ALLOWED_PROFILE_FIELDS = new Set<string>(['displayName', ...MATCHING_PROFILE_FIELDS]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -76,6 +69,32 @@ export function sanitizeVisibleProfile(value: unknown): AiVisibleProfile {
     }
   }
   return result;
+}
+
+/** True when the projection carries at least one matching-profile field. */
+export function hasMatchingFields(profile: AiVisibleProfile): boolean {
+  return MATCHING_PROFILE_FIELDS.some((field) => profile[field] !== undefined);
+}
+
+/** The chat-profile part only: the display name, when there is one. */
+export function chatOnlyProfile(profile: AiVisibleProfile): AiVisibleProfile {
+  return profile.displayName !== undefined ? { displayName: profile.displayName } : {};
+}
+
+/**
+ * Both participants as the AI may see them. Matching fields are kept only when BOTH projections carry
+ * some; otherwise both are reduced to their display names. State already withholds matching fields
+ * unless both members' matching profiles are ACTIVE (design §8.6); this is the same rule applied again
+ * on receipt, so a one-sided projection can never reach the model.
+ */
+export function visibleProfilesForPair(
+  requestingUser: AiVisibleProfile,
+  matchedUser: AiVisibleProfile,
+): { requestingUser: AiVisibleProfile; matchedUser: AiVisibleProfile } {
+  if (hasMatchingFields(requestingUser) && hasMatchingFields(matchedUser)) {
+    return { requestingUser, matchedUser };
+  }
+  return { requestingUser: chatOnlyProfile(requestingUser), matchedUser: chatOnlyProfile(matchedUser) };
 }
 
 export class OneHookDataClient {
@@ -154,8 +173,10 @@ export class OneHookDataClient {
     return {
       matchId,
       status: 'active',
-      requestingUser: sanitizeVisibleProfile(body.requestingUser.visibleProfile),
-      matchedUser: sanitizeVisibleProfile(body.matchedUser.visibleProfile),
+      ...visibleProfilesForPair(
+        sanitizeVisibleProfile(body.requestingUser.visibleProfile),
+        sanitizeVisibleProfile(body.matchedUser.visibleProfile),
+      ),
       profileAllowed: body.contextPolicy.profileAllowed === true,
       messageHistoryAllowed: body.contextPolicy.messageHistoryAllowed === true,
       policyVersion: typeof body.contextPolicy.policyVersion === 'string'
