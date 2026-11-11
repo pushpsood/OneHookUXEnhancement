@@ -9,7 +9,7 @@ import {
  * Mr OneHook account deletion (design §8.6).
  *
  * Profile publishes `UserDeleted` (source `club.onehook.profile`) on the OneHook AWS event bus; an
- * EventBridge rule delivers it to the SQS queue `OneHook-UxErasure-<stage>` (DLQ after 5 receives,
+ * EventBridge rule delivers it to the SQS queue `OneHook-Matching-<stage>-UxErasure` (DLQ after 5 receives,
  * visibility timeout 5 minutes, DLQ alarm). This worker long-polls that queue with the federated role
  * `OneHook-MrOneHook-<stage>-Role` (Azure managed identity → STS web identity; the role may only
  * ReceiveMessage, DeleteMessage, ChangeMessageVisibility and GetQueueAttributes on it) and, for each

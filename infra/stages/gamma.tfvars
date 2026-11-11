@@ -24,5 +24,5 @@ aws_audience_import_identifier_uri = "api://8a078d5e-ad9d-4156-b89d-419871233992
 # Account deletion: UserDeleted reaches this queue (created next to the role by the Matching stack) and
 # the backend erases the member's AI sessions and quota ledger. Same account and region as the role
 # above; equals the Matching stack output UxErasureQueueUrl, so re-check it there after a redeploy.
-ux_erasure_queue_url = "https://sqs.ap-south-1.amazonaws.com/627367419734/OneHook-UxErasure-gamma"
+ux_erasure_queue_url = "https://sqs.ap-south-1.amazonaws.com/627367419734/OneHook-Matching-gamma-UxErasure"
 

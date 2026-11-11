@@ -36,6 +36,6 @@ onehook_matching_api_url = ""
 
 # PLACEHOLDER: empty keeps the account-erasure worker off. The prod queue exists only once prod is in
 # OneHookBackend infra/config/mr-onehook.ts; then set this to the prod Matching stack output
-# UxErasureQueueUrl (https://sqs.<region>.amazonaws.com/<prod account>/OneHook-UxErasure-prod), together
+# UxErasureQueueUrl (https://sqs.<region>.amazonaws.com/<prod account>/OneHook-Matching-prod-UxErasure), together
 # with onehook_data_api_aws_role_arn above.
 ux_erasure_queue_url = ""

@@ -427,7 +427,7 @@ test('SQS adapter long-polls the configured queue with the abort signal and maps
       };
     },
   };
-  const url = 'https://sqs.ap-south-1.amazonaws.com/123456789012/OneHook-UxErasure-gamma';
+  const url = 'https://sqs.ap-south-1.amazonaws.com/123456789012/OneHook-Matching-gamma-UxErasure';
   const queue = new SqsErasureQueue(client as never, url);
   const abort = new AbortController();
   assert.deepEqual(await queue.receive(4, abort.signal), [{ messageId: 'id-1', receiptHandle: 'rh-1', body: '{}', receiveCount: 3 }]);
@@ -449,12 +449,12 @@ test('config: off without a queue URL, rejects a non-SQS URL, parses the region'
   assert.equal(bad.configured, false);
   assert.equal(bad.problems.length, 1);
   const good = loadUxErasureConfig({
-    UX_ERASURE_QUEUE_URL: ' https://sqs.ap-south-1.amazonaws.com/627367419734/OneHook-UxErasure-gamma ',
+    UX_ERASURE_QUEUE_URL: ' https://sqs.ap-south-1.amazonaws.com/627367419734/OneHook-Matching-gamma-UxErasure ',
     UX_ERASURE_CONCURRENCY: '6',
   });
   assert.deepEqual(good, {
     configured: true,
-    queueUrl: 'https://sqs.ap-south-1.amazonaws.com/627367419734/OneHook-UxErasure-gamma',
+    queueUrl: 'https://sqs.ap-south-1.amazonaws.com/627367419734/OneHook-Matching-gamma-UxErasure',
     region: 'ap-south-1',
     concurrency: 6,
     problems: [],

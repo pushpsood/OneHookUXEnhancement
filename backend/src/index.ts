@@ -146,7 +146,7 @@ const app = createApp({
   publicChat: { client, deployment, productContextProvider: fetchGitHubContext },
 });
 
-// Mr OneHook account deletion: consume UserDeleted from OneHook-UxErasure-<stage> and delete the member's
+// Mr OneHook account deletion: consume UserDeleted from OneHook-Matching-<stage>-UxErasure and delete the member's
 // AI sessions and quota ledger (design §8.6). Independent of CONTEXTUAL_AI_ENABLED: data written while the
 // feature was on must still be erased. Off when UX_ERASURE_QUEUE_URL is empty. Without the session
 // container it stays off rather than acknowledge deletions it cannot carry out.

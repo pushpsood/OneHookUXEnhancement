@@ -149,13 +149,13 @@ variable "onehook_data_api_aws_role_arn" {
 }
 
 variable "ux_erasure_queue_url" {
-  description = "URL of the SQS queue OneHook-UxErasure-<stage> (OneHookBackend Matching stack output UxErasureQueueUrl). Mr OneHook long-polls it for UserDeleted and erases the member's AI sessions and quota ledger. The role has no sqs:GetQueueUrl, so the URL is configured directly. Empty disables the erasure worker."
+  description = "URL of the SQS queue OneHook-Matching-<stage>-UxErasure (OneHookBackend Matching stack output UxErasureQueueUrl). Mr OneHook long-polls it for UserDeleted and erases the member's AI sessions and quota ledger. The role has no sqs:GetQueueUrl, so the URL is configured directly. Empty disables the erasure worker."
   type        = string
   default     = ""
 
   validation {
-    condition     = var.ux_erasure_queue_url == "" || can(regex("^https://sqs\\.[a-z0-9-]+\\.amazonaws\\.com/[0-9]{12}/OneHook-UxErasure-[a-z0-9]+$", var.ux_erasure_queue_url))
-    error_message = "ux_erasure_queue_url must be empty or https://sqs.<region>.amazonaws.com/<account>/OneHook-UxErasure-<stage>."
+    condition     = var.ux_erasure_queue_url == "" || can(regex("^https://sqs\\.[a-z0-9-]+\\.amazonaws\\.com/[0-9]{12}/OneHook-Matching-[a-z0-9]+-UxErasure$", var.ux_erasure_queue_url))
+    error_message = "ux_erasure_queue_url must be empty or https://sqs.<region>.amazonaws.com/<account>/OneHook-Matching-<stage>-UxErasure."
   }
 }
 

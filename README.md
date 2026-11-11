@@ -18,7 +18,7 @@ flowchart LR
 
   subgraph AWS["Amazon Web Services · AWS"]
     Cognito["Amazon Cognito<br/>JWT/JWKS + tier claim"]
-    UxQueue[("SQS OneHook-UxErasure-&lt;stage&gt;<br/>UserDeleted from Profile")]
+    UxQueue[("SQS OneHook-Matching-&lt;stage&gt;-UxErasure<br/>UserDeleted from Profile")]
   end
 
   subgraph OneHookPlatform["OneHook platform services"]
@@ -285,8 +285,8 @@ registrations (Application Administrator, or `Application.ReadWrite.OwnedBy` as 
 
 When a member deletes their account, Profile publishes `UserDeleted` (source `club.onehook.profile`,
 `detail.userId`). An EventBridge rule in the OneHookBackend Matching stack delivers it to the standard SQS
-queue `OneHook-UxErasure-<stage>` (SSE-SQS, visibility timeout 5 minutes, DLQ
-`OneHook-UxErasure-<stage>-DLQ` after 5 receives, with an alarm on the DLQ). The message body is the
+queue `OneHook-Matching-<stage>-UxErasure` (SSE-SQS, visibility timeout 5 minutes, DLQ
+`OneHook-Matching-<stage>-UxErasureDLQ` after 5 receives, with an alarm on the DLQ). The message body is the
 EventBridge event JSON.
 
 A background worker in this App Service (`backend/src/uxErasureWorker.ts`) long-polls the queue (20 s
@@ -317,7 +317,7 @@ out.
 
 Terraform sets `UX_ERASURE_QUEUE_URL` from `ux_erasure_queue_url` in `infra/stages/<stage>.tfvars`. Take the
 value from the Matching stack output `UxErasureQueueUrl`
-(`https://sqs.<region>.amazonaws.com/<account>/OneHook-UxErasure-<stage>`); the role has no
+(`https://sqs.<region>.amazonaws.com/<account>/OneHook-Matching-<stage>-UxErasure`); the role has no
 `sqs:GetQueueUrl`, so the URL is configured directly. prod is empty (worker off) until the prod role and
 queue exist.
 
@@ -332,7 +332,7 @@ may do exactly this:
 | `execute-api:Invoke` | State `GET /api/ai-context/matches/*` | AI context for a connection chat |
 | `execute-api:Invoke` | State `GET /state/internal/users/*/matching` | Matching-mode check before a suggestion |
 | `execute-api:Invoke` | Matching `POST /matching/internal/suggestions` | Recording a "find me ..." suggestion |
-| `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`, `sqs:GetQueueAttributes` | `OneHook-UxErasure-<stage>` | Account deletion |
+| `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`, `sqs:GetQueueAttributes` | `OneHook-Matching-<stage>-UxErasure` | Account deletion |
 
 In Azure, the App Service identity has Blob Data Contributor on the `aisessions` container and Table Data
 Contributor on the `chatquota` table, which is what erasure needs; no new Azure role is required.
@@ -384,7 +384,7 @@ npm run dev
 | `AUTH_TIER_CLAIM` | Verified Cognito access-token tier claim; may be `cognito:groups` | `custom:tier` | When session storage is enabled |
 | `CHAT_SESSION_TIER_POLICIES` | JSON map of eligible tiers and server-enforced limits | `{}` | When session storage is enabled |
 | `CHAT_SESSION_MAX_RETENTION_DAYS` | Infrastructure/application retention hard cap | `90` | No |
-| `UX_ERASURE_QUEUE_URL` | SQS queue `OneHook-UxErasure-<stage>` for account deletion; empty turns the erasure worker off | — | For account erasure |
+| `UX_ERASURE_QUEUE_URL` | SQS queue `OneHook-Matching-<stage>-UxErasure` for account deletion; empty turns the erasure worker off | — | For account erasure |
 | `UX_ERASURE_CONCURRENCY` | Erasure messages processed at once (1-10) | `4` | No |
 
 Terraform injects the non-secret production settings. Authentication values remain empty and `contextual_ai_enabled` remains `false` by default; provide reviewed environment-specific Terraform values only after the upstream contracts are ready.
