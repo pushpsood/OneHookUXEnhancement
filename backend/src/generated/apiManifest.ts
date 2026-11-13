@@ -147,6 +147,7 @@ export const API_OPERATIONS: readonly ApiOperation[] = [
   { operationId: "GetMatch", method: "GET", path: "/state/match/{matchId}", service: "state", auth: "cognito" },
   { operationId: "DisableMatching", method: "POST", path: "/state/matching/disable", service: "state", auth: "cognito" },
   { operationId: "EnableMatching", method: "POST", path: "/state/matching/enable", service: "state", auth: "cognito" },
+  { operationId: "SetMatchingTabHidden", method: "PUT", path: "/state/matching/tab-hidden", service: "state", auth: "cognito" },
   { operationId: "ReportMember", method: "POST", path: "/state/reports", service: "state", auth: "cognito" },
   { operationId: "Unhook", method: "POST", path: "/state/unhook", service: "state", auth: "cognito" },
   { operationId: "UpgradeUser", method: "POST", path: "/state/upgrade", service: "state", auth: "cognito" },
