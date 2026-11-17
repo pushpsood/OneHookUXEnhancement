@@ -19,6 +19,7 @@ on:
     paths:
       - 'backend/**'
       - 'infra/**'
+      - 'sdk/model/**'
       - '.github/workflows/deploy.yml'
       - '.github/workflows/deploy-stage.yml'
   workflow_dispatch:
@@ -48,6 +49,16 @@ jobs:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
+      # The API contract (sdk/model/mr-onehook.smithy): build it so the backend's contract tests compare
+      # their committed OpenAPI copy with the model, and fail on a stale copy.
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'corretto'
+          cache: 'maven'
+      - name: Build the Mr OneHook SDK
+        working-directory: ./sdk
+        run: npm run build && npm test && npm run manifest:check-sync
       - name: Install Dependencies
         working-directory: ./backend
         run: npm ci

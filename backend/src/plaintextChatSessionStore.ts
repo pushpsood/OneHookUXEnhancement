@@ -2,30 +2,21 @@ import { createHash } from 'node:crypto';
 import type { ContainerClient } from '@azure/storage-blob';
 import type { ChatSessionTierPolicy } from './contextConfig';
 
-export interface ChatSessionMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  createdAt: string;
-  exchangeId: string;
-}
+import type {
+  ChatSessionDetail,
+  ChatSessionMessage as WireChatSessionMessage,
+  ChatSessionSummary,
+} from './generated/mrOneHookModels';
 
-export interface ChatSession {
-  sessionId: string;
-  matchId?: string;
-  createdAt: string;
-  updatedAt: string;
-  expiresAt: string;
-  messages: ChatSessionMessage[];
-}
+// The stored session is the API's `ChatSessionDetail` plus storage-only fields; the summary is the
+// API's `ChatSessionSummary` (mr-onehook.smithy).
+export type { ChatSessionSummary };
 
-export interface ChatSessionSummary {
-  sessionId: string;
-  scope: 'product' | 'connection';
-  createdAt: string;
-  updatedAt: string;
-  expiresAt: string;
-  messageCount: number;
-}
+/** A stored turn: the API's `ChatSessionMessage` plus the exchange it belongs to (idempotency). */
+export type ChatSessionMessage = WireChatSessionMessage & { exchangeId: string };
+
+/** A stored session: the API's `ChatSessionDetail` with stored turns. */
+export type ChatSession = Omit<ChatSessionDetail, 'messages'> & { messages: ChatSessionMessage[] };
 
 interface SessionRecord {
   schemaVersion: 1;

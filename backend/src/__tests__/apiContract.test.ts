@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { API_OPERATIONS } from '../generated/apiManifest';
+import { API_OPERATIONS as MR_ONEHOOK_OPERATIONS } from '../generated/mrOneHookApiManifest';
 import { createApp } from '../app';
 import { loadContextualFeatureConfig } from '../contextConfig';
 import { QuotaUnavailableError } from '../chatQuota';
@@ -15,7 +16,8 @@ import {
   lex,
   normalizeTemplate,
   productionSources,
-  scanOutboundCalls,
+  scanSdkCalls,
+  SDK_TRANSPORT_FILE,
   scanRoutes,
   type SourceFile,
 } from './contract/sourceScan';
@@ -30,14 +32,14 @@ import {
 } from './contract/openapi';
 
 /**
- * API contract tests: this service against the Smithy-generated manifest (src/generated/apiManifest.ts)
- * and Mr OneHook's OpenAPI (mr-onehook.smithy, vendored copy in contract/).
+ * API contract tests: this service against its own Smithy model (sdk/model/mr-onehook.smithy: the manifest
+ * src/generated/mrOneHookApiManifest.ts and the OpenAPI copy in contract/, both written by the SDK's
+ * manifest:sync) and, for outbound calls, the OneHook backend's manifest (src/generated/apiManifest.ts).
  *  (a) every Express route it registers is a `MrOneHookService` operation, and every operation has a route;
  *  (b) every outbound call is a OneHook operation with `auth: iam` (and is SigV4-signed);
  *  (c) every route's success and error bodies match the operation's declared responses.
  */
 
-const MR_ONEHOOK_OPERATIONS = API_OPERATIONS.filter((op) => op.service === 'mr-onehook');
 
 // ── (a) Routes ────────────────────────────────────────────────────────────────
 
@@ -57,15 +59,15 @@ test('(a) every registered Express route is a MrOneHookService operation, and ev
 
 // ── (b) Outbound calls ────────────────────────────────────────────────────────
 
-test('(b) every outbound call is a manifest operation with auth: iam', () => {
-  const { calls, problems } = scanOutboundCalls(productionSources());
-  assert.deepEqual(problems, [], 'outbound call sites the scan cannot resolve');
+test('(b) every call to the OneHook backend goes through the generated client, and is an auth: iam operation', () => {
+  const { calls, problems } = scanSdkCalls(productionSources());
+  assert.deepEqual(problems, [], 'outbound HTTP that is not a generated-client call');
   const notIam: string[] = [];
   const found = new Set<string>();
   for (const call of calls) {
-    const op = API_OPERATIONS.find((o) => o.method === call.method && normalizeTemplate(o.path) === call.path);
-    if (!op) notIam.push(`${call.method} ${call.rawPath} (${call.file}:${call.line}): not in the manifest`);
-    else if (op.auth !== 'iam') notIam.push(`${call.method} ${call.rawPath} (${call.file}:${call.line}): ${op.operationId} is auth: ${op.auth}`);
+    const op = API_OPERATIONS.find((o) => o.operationId === call.operationId);
+    if (!op) notIam.push(`${call.operationId} (${call.file}:${call.line}): not a OneHookService operation`);
+    else if (op.auth !== 'iam') notIam.push(`${call.operationId} (${call.file}:${call.line}): auth: ${op.auth}`);
     else found.add(op.operationId);
   }
   assert.deepEqual(notIam, []);
@@ -97,27 +99,27 @@ test('(a) scan: unresolvable route registrations are problems, not skipped', () 
   assert.deepEqual(routes.map((r) => `${r.method} ${r.path}`), ['DELETE /a/{id}/b']);
 });
 
-test('(b) scan: unresolvable or unsigned outbound calls are problems, not skipped', () => {
-  const signed = (url: string, extra = '') => `const url = new URL(${url});\nconst headers = await this.signer.sign({ method: 'GET', url, headers: {} });\n${extra}await this.fetchImpl(url.toString(), { method: 'GET', headers });`;
+test('(b) scan: hand-built HTTP is a problem; generated-client operations are read', () => {
   const cases: Record<string, string> = {
-    'URL not a const': 'await fetch(someUrl, { method: "GET" });',
-    'URL from config': "const url = new URL(config.endpoint);\nawait fetch(url, { method: 'GET' });",
+    'global fetch': "await fetch('https://x/state', { method: 'GET' });",
+    'fetch field': 'class C { constructor(private readonly fetchImpl: typeof fetch = fetch) {} m() { return this.fetchImpl(u); } }',
     'fetch aliased': 'const f = fetch;\nawait f(u);',
-    'no method': "const url = new URL(`${this.baseUrl}/x`);\nawait fetch(url, {});",
-    'unsigned': "const url = new URL(`${this.baseUrl}/x`);\nawait fetch(url, { method: 'GET' });",
-    'signed with another method': signed('`${this.baseUrl}/x`').replace("method: 'GET', headers }", "method: 'POST', headers }"),
-    'partial segment': signed('`${this.baseUrl}/x/u-${id}`'),
-    'path mutated': signed('`${this.baseUrl}/x`', "url.pathname = '/y';\n"),
     'other HTTP client': "import https from 'node:https';",
+    'bare SDK client': "import { OneHookClient } from 'onehook-api-client';",
+    'opaque send': 'class C { private readonly api: OneHook; m() { return this.api.send(cmd); } }',
   };
   for (const [name, text] of Object.entries(cases)) {
-    const { problems } = scanOutboundCalls(scanOf(`class C { fetchImpl: typeof fetch = fetch; async m() {\n${text}\n} }`));
-    assert.ok(problems.length > 0, name);
+    assert.ok(scanSdkCalls(scanOf(text)).problems.length > 0, name);
   }
-  const { calls, problems } = scanOutboundCalls(scanOf(
-    `class C { constructor(private readonly fetchImpl: typeof fetch = fetch) {} async m() {\n${signed('`${this.baseUrl}/state/internal/users/${encodeURIComponent(id)}/matching`')}\n} }`));
+  const { calls, problems } = scanSdkCalls(scanOf(
+    "import { GetUserStateCommand } from 'onehook-api-client';\nimport { ReceiveMessageCommand } from '@aws-sdk/client-sqs';\n"
+      + 'class C { private readonly api: OneHook;\n constructor(f: typeof fetch = fetch) { this.api = createOneHookApiClient({ fetchImpl: f }); }\n'
+      + ' m() { return this.api.getAiContextMatch({ matchId }); } n() { return new GetUserStateCommand({}); } }\n'
+      + 'new ReceiveMessageCommand({});'));
   assert.deepEqual(problems, []);
-  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), ['GET /state/internal/users/{}/matching']);
+  assert.deepEqual(calls.map((c) => c.operationId), ['GetAiContextMatch', 'GetUserState']);
+  // The transport itself may call fetch.
+  assert.deepEqual(scanSdkCalls([{ file: SDK_TRANSPORT_FILE, text: 'await fetchImpl(url, init);' }]).problems, []);
 });
 
 test('scan: the lexer keeps code and string contents apart', () => {
@@ -136,16 +138,16 @@ test('(c) the vendored OpenAPI has exactly the manifest MrOneHookService operati
     .map((op) => `${op.operationId} ${op.method} ${op.path} ${Array.isArray(op.security) && op.security.length === 0 ? 'none' : 'cognito'}`)
     .sort();
   const fromManifest = MR_ONEHOOK_OPERATIONS.map((op) => `${op.operationId} ${op.method} ${op.path} ${op.auth}`).sort();
-  assert.deepEqual(fromOpenApi, fromManifest, `stale ${VENDORED_OPENAPI_PATH}: refresh it from OneHookBackend`);
+  assert.deepEqual(fromOpenApi, fromManifest, `stale ${VENDORED_OPENAPI_PATH}: run npm --prefix ../sdk run manifest:sync`);
 });
 
-test('(c) the vendored OpenAPI equals the OneHookBackend build (when that checkout is present)', (t) => {
+test('(c) the vendored OpenAPI equals the sdk/ build (when it has been built)', (t) => {
   if (!siblingOpenApiPresent()) {
     t.skip(`no ${SIBLING_OPENAPI_PATH}; only the operation list is checked against the manifest`);
     return;
   }
   assert.equal(readFileSync(VENDORED_OPENAPI_PATH, 'utf8'), readFileSync(SIBLING_OPENAPI_PATH, 'utf8'),
-    'the vendored MrOneHookService.openapi.json is stale: copy it from the OneHookBackend build');
+    'the vendored MrOneHookService.openapi.json is stale: run npm --prefix ../sdk run manifest:sync');
 });
 
 // ── (c) Response bodies, per route ────────────────────────────────────────────

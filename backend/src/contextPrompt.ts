@@ -5,20 +5,14 @@ import type {
   EphemeralMessageExcerpt,
   Mood,
 } from './contextTypes';
+import type { ContextUsed } from './generated/mrOneHookModels';
 import type { ChatSessionMessage } from './plaintextChatSessionStore';
 import { sanitizeMatchSuggestion, type MatchSuggestion } from './matchingSuggestionClient';
 import { visibleProfilesForPair } from './oneHookDataClient';
 
 const ALLOWED_MOODS = new Set<Mood>(['Happy', 'Neutral', 'Thinking', 'Sad', 'Excited']);
 
-export interface ContextUsed {
-  profile: boolean;
-  match: boolean;
-  messageHistory: boolean;
-  messageCount: number;
-  chatSession: boolean;
-  sessionMessageCount: number;
-}
+export type { ContextUsed };
 
 export function buildContextualSystemPrompt(
   match: AiVisibleMatchContext | undefined,

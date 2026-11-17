@@ -3,7 +3,7 @@
 // Regenerate: (OneHookBackend) npm --prefix packages/api-models run build && npm run api:sync
 /* eslint-disable */
 
-export type ApiAuth = 'cognito' | 'iam' | 'none' | 'session';
+export type ApiAuth = 'cognito' | 'iam' | 'none';
 
 export interface ApiOperation {
   readonly operationId: string;
@@ -13,21 +13,8 @@ export interface ApiOperation {
   readonly auth: ApiAuth;
 }
 
-/** Every OneHook HTTP operation, sorted by service, path, method. */
+/** Every OneHook backend HTTP operation, sorted by service, path, method. */
 export const API_OPERATIONS: readonly ApiOperation[] = [
-  { operationId: "GetAdmissionsApplication", method: "GET", path: "/api/p/{service}/{stage}/admissions/application", service: "admissions", auth: "session" },
-  { operationId: "CreateAdmissionsApplication", method: "POST", path: "/api/p/{service}/{stage}/admissions/application", service: "admissions", auth: "session" },
-  { operationId: "WithdrawAdmissionsApplication", method: "DELETE", path: "/api/p/{service}/{stage}/admissions/application/{applicationId}", service: "admissions", auth: "session" },
-  { operationId: "CompleteApplicationUpload", method: "POST", path: "/api/p/{service}/{stage}/admissions/application/{applicationId}/upload/complete", service: "admissions", auth: "session" },
-  { operationId: "GetUploadPartUrls", method: "POST", path: "/api/p/{service}/{stage}/admissions/application/{applicationId}/upload/parts", service: "admissions", auth: "session" },
-  { operationId: "CreateAttestationChallenge", method: "POST", path: "/api/p/{service}/{stage}/admissions/attest/challenge", service: "admissions", auth: "none" },
-  { operationId: "RegisterAttestationKey", method: "POST", path: "/api/p/{service}/{stage}/admissions/attest/register", service: "admissions", auth: "none" },
-  { operationId: "CreateLivenessChallenge", method: "POST", path: "/api/p/{service}/{stage}/admissions/challenge", service: "admissions", auth: "session" },
-  { operationId: "GetAdmissionsConfig", method: "GET", path: "/api/p/{service}/{stage}/admissions/config", service: "admissions", auth: "none" },
-  { operationId: "RecordAdmissionsConsent", method: "POST", path: "/api/p/{service}/{stage}/admissions/consent", service: "admissions", auth: "session" },
-  { operationId: "WithdrawTrainingConsent", method: "POST", path: "/api/p/{service}/{stage}/admissions/consent/withdraw", service: "admissions", auth: "session" },
-  { operationId: "StartAdmissionsOtp", method: "POST", path: "/api/p/{service}/{stage}/admissions/otp/start", service: "admissions", auth: "none" },
-  { operationId: "VerifyAdmissionsOtp", method: "POST", path: "/api/p/{service}/{stage}/admissions/otp/verify", service: "admissions", auth: "none" },
   { operationId: "GetGraphMatch", method: "GET", path: "/graph/matches/{matchId}", service: "analytics", auth: "iam" },
   { operationId: "GetGraphUser", method: "GET", path: "/graph/users/{userId}", service: "analytics", auth: "iam" },
   { operationId: "GetGraphInvites", method: "GET", path: "/graph/users/{userId}/invites", service: "analytics", auth: "iam" },
@@ -98,14 +85,6 @@ export const API_OPERATIONS: readonly ApiOperation[] = [
   { operationId: "IssueViewPasses", method: "POST", path: "/matching/view-passes", service: "matching", auth: "cognito" },
   { operationId: "GetPreferences", method: "GET", path: "/matching/{userId}/preferences", service: "matching", auth: "cognito" },
   { operationId: "UpdatePreferences", method: "PUT", path: "/matching/{userId}/preferences", service: "matching", auth: "cognito" },
-  { operationId: "CompleteEvidence", method: "POST", path: "/api/p/{service}/{stage}/moderation/evidence/complete", service: "moderation-evidence", auth: "cognito" },
-  { operationId: "PresignEvidence", method: "POST", path: "/api/p/{service}/{stage}/moderation/evidence/presign", service: "moderation-evidence", auth: "cognito" },
-  { operationId: "ProductConnectionChat", method: "POST", path: "/api/member/product-connection-chat", service: "mr-onehook", auth: "cognito" },
-  { operationId: "ListChatSessions", method: "GET", path: "/api/member/product-connection-chat/sessions", service: "mr-onehook", auth: "cognito" },
-  { operationId: "DeleteChatSession", method: "DELETE", path: "/api/member/product-connection-chat/sessions/{sessionId}", service: "mr-onehook", auth: "cognito" },
-  { operationId: "GetChatSession", method: "GET", path: "/api/member/product-connection-chat/sessions/{sessionId}", service: "mr-onehook", auth: "cognito" },
-  { operationId: "PublicProductChat", method: "POST", path: "/api/public/product-chat", service: "mr-onehook", auth: "none" },
-  { operationId: "GetHealth", method: "GET", path: "/health", service: "mr-onehook", auth: "none" },
   { operationId: "GetMyProfile", method: "GET", path: "/profile", service: "profile", auth: "cognito" },
   { operationId: "GetBirthDateStatus", method: "GET", path: "/profile-admin/{userId}/birth-date", service: "profile", auth: "iam" },
   { operationId: "CorrectBirthDate", method: "PUT", path: "/profile-admin/{userId}/birth-date", service: "profile", auth: "iam" },

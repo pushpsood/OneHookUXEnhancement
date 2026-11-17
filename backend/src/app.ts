@@ -4,9 +4,10 @@ import type { AzureOpenAI } from 'openai';
 import type { ContextualFeatureConfig } from './contextConfig';
 import { createContextualRouter, type ContextualServices } from './contextRoutes';
 import { parseContextualModelResponse } from './contextPrompt';
+import type { PublicChatMessage, PublicProductChatRequestContent } from './generated/mrOneHookModels';
 
 /**
- * The Express app that serves `MrOneHookService` (OneHookBackend mr-onehook.smithy): middleware, every
+ * The Express app that serves `MrOneHookService` (sdk/model/mr-onehook.smithy): middleware, every
  * route, the 404 and error handlers. index.ts wires the real Azure/AWS dependencies and listens; the
  * contract tests build the same app with fakes.
  */
@@ -28,19 +29,10 @@ interface RateLimitData {
   expiry: number;
 }
 
-interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
+type ChatMessage = PublicChatMessage;
 
-interface ChatRequestBody {
-  messages?: ChatMessage[];
-  userDemographics?: {
-    gender?: string;
-    sexualPreference?: string;
-  };
-  honeypot?: string;
-}
+/** The request body as received: the generated shape, with nothing yet checked (every member may be absent). */
+type ChatRequestBody = Partial<PublicProductChatRequestContent>;
 
 export function createApp(options: AppOptions): Express {
   const { corsAllowedOrigins, contextualConfig, contextualServices, publicChat } = options;

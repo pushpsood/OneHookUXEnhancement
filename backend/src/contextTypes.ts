@@ -1,6 +1,17 @@
-import type { SubscriptionTier } from 'onehook-api-client';
+import type {
+  AiContextMatch,
+  AiContextPolicy,
+  AiVisibleProfile,
+  SubscriptionTier,
+} from 'onehook-api-client';
+import type {
+  EphemeralMessageContext as WireEphemeralMessageContext,
+  EphemeralMessageExcerpt,
+  Mood,
+} from './generated/mrOneHookModels';
 
-export type Mood = 'Happy' | 'Neutral' | 'Thinking' | 'Sad' | 'Excited';
+// The API's own shapes are the generated MrOneHookService models (sdk/model/mr-onehook.smithy).
+export type { EphemeralMessageExcerpt, Mood };
 
 export interface AuthenticatedPrincipal {
   subject: string;
@@ -11,17 +22,8 @@ export interface AuthenticatedPrincipal {
   permissions: Set<string>;
 }
 
-export interface EphemeralMessageExcerpt {
-  speaker: 'self' | 'match';
-  sentAt: string;
-  text: string;
-}
-
-export interface EphemeralMessageContext {
-  excerpts: EphemeralMessageExcerpt[];
-  historyTruncated: boolean;
-  userConfirmed: boolean;
-}
+/** A validated `ephemeralMessageContext`: the generated shape with its flags resolved (absent = false). */
+export type EphemeralMessageContext = Required<WireEphemeralMessageContext>;
 
 export interface ContextualChatInput {
   matchId?: string;
@@ -49,28 +51,23 @@ export const MATCHING_PROFILE_FIELDS = [
   'relationshipGoals',
 ] as const;
 
-export interface MatchingProfileFields {
-  pronouns?: string;
-  bio?: string;
-  interests?: string[];
-  communicationPreferences?: string[];
-  relationshipGoals?: string[];
-}
+export type MatchingProfileFields = Omit<AiVisibleProfile, 'displayName'>;
 
-/** What the AI may see about one participant: the chat-profile display name, plus optional matching fields. */
-export interface AiVisibleProfile extends MatchingProfileFields {
-  displayName?: string;
-}
+/**
+ * What the AI may see about one participant: the chat-profile display name, plus optional matching
+ * fields. The backend's `AiVisibleProfile` (onehook-api-client), as State returns it.
+ */
+export type { AiVisibleProfile };
 
-export interface AiVisibleMatchContext {
-  matchId: string;
+/**
+ * An authorized, active match as the prompt builder uses it: the backend's `AiContextMatch` with each
+ * participant reduced to its visible profile and the context policy flattened in.
+ */
+export type AiVisibleMatchContext = Pick<AiContextMatch, 'matchId'> & AiContextPolicy & {
   status: 'active';
   requestingUser: AiVisibleProfile;
   matchedUser: AiVisibleProfile;
-  profileAllowed: boolean;
-  messageHistoryAllowed: boolean;
-  policyVersion: string;
-}
+};
 
 export interface AdditionalContextRequest {
   searchTerms: string[];
