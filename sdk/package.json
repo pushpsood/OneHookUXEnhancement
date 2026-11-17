@@ -9,7 +9,7 @@
     "test": "node --test test/*.test.mjs",
     "manifest:sync": "node scripts/manifest.mjs --sync",
     "manifest:check-sync": "node scripts/manifest.mjs --check-sync",
-    "publish-sdk": "npm run build && npm --prefix build/package publish"
+    "publish-sdk": "npm run build && npm publish ./build/package --access public"
   },
   "engines": { "node": ">=20" }
 }

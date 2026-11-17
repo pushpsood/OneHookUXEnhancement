@@ -61,7 +61,7 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           npm run build
           npm test
-          npm --prefix build/package publish --access public
+          npm publish ./build/package --access public
           git add package.json
           git commit -m "chore(release): onehook-mr-onehook-client@${VERSION}"
           git tag "sdk-v${VERSION}"
