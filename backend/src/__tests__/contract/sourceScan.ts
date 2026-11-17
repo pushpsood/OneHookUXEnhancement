@@ -5,7 +5,7 @@ import path from 'node:path';
  * Static scan of this service's production sources (src/**\/*.ts, without __tests__ and generated) for
  * the two things the API contract tests compare with the generated manifest:
  *  - every Express route it registers ({@link scanRoutes});
- *  - every outbound HTTP call it makes ({@link scanOutboundCalls}).
+ *  - every OneHook backend operation it calls, which must go through the generated client ({@link scanSdkCalls}).
  *
  * The scan fails closed: anything it cannot resolve to a literal method and path (a path in a variable,
  * a router created without a name, `fetch` passed around, a URL it cannot read, ...) is returned as a
@@ -369,99 +369,88 @@ const OTHER_HTTP_MODULES = new Set([
 ]);
 const IMPORT_FROM = /\b(?:import|export)\b[^;]*?\bfrom\s*(['"])([^'"]+)\1|\brequire\s*\(\s*(['"])([^'"]+)\3\s*\)|\bimport\s*\(\s*(['"])([^'"]+)\5\s*\)/g;
 const FETCH_ALIAS = /([\w$]+)\s*\??\s*:\s*typeof\s+fetch\b/g;
-const URL_MUTATION = /\.\s*(?:pathname|href|host|hostname|port|protocol|origin)\s*=(?!=)/;
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function scanOutboundCalls(files: SourceFile[]): { calls: FoundCall[]; problems: ScanProblem[] } {
-  const calls: FoundCall[] = [];
+/**
+ * The one production file allowed to call `fetch`: the transport of the generated OneHook client. It sends
+ * the request the SDK serialized from the model; it never builds a URL or a body itself.
+ */
+export const SDK_TRANSPORT_FILE = 'src/oneHookApiClient.ts';
+
+/** One OneHook backend operation this service calls through the generated `OneHook` client. */
+export interface FoundSdkCall {
+  file: string;
+  line: number;
+  /** The Smithy operation (`getAiContextMatch(` -> `GetAiContextMatch`, `new XCommand(` -> `X`). */
+  operationId: string;
+}
+
+/**
+ * Every call this service makes to another service must go through that service's generated client. For the
+ * OneHook backend that is `onehook-api-client`'s `OneHook` client (built by ./oneHookApiClient.ts). This scan
+ * returns every operation called on a value typed `OneHook` (or constructed as a `*Command`), and reports as a
+ * problem any other outbound HTTP: a `fetch` (or a `typeof fetch` alias) called outside {@link SDK_TRANSPORT_FILE},
+ * another HTTP module, or `XMLHttpRequest`. It fails closed: what it cannot follow is a problem.
+ */
+export function scanSdkCalls(files: SourceFile[]): { calls: FoundSdkCall[]; problems: ScanProblem[] } {
+  const calls: FoundSdkCall[] = [];
   const problems: ScanProblem[] = [];
   const lexed = files.map((f) => ({ ...f, lx: lex(f.text) }));
-
-  // Every name typed `typeof fetch` (constructor parameters, fields) is a fetch alias, in every file.
   const aliases = new Set<string>(['fetch']);
   for (const { lx } of lexed) for (const m of lx.skel.matchAll(FETCH_ALIAS)) aliases.add(m[1]!);
 
   for (const { file, text, lx } of lexed) {
-    // Imports read from `code`: module specifiers are string contents, blanked in `skel`.
     for (const m of lx.code.matchAll(IMPORT_FROM)) {
       const spec = m[2] ?? m[4] ?? m[6] ?? '';
       if (OTHER_HTTP_MODULES.has(spec)) {
-        problems.push({ file, line: lineOf(text, m.index!), reason: `imports \`${spec}\`; outbound HTTP must go through fetch so the contract scan sees it` });
+        problems.push({ file, line: lineOf(text, m.index!), reason: `imports \`${spec}\`; call other services through their generated client` });
+      }
+      if (spec === 'onehook-api-client' && /\bOneHookClient\b/.test(m[0])) {
+        problems.push({ file, line: lineOf(text, m.index!), reason: 'uses the bare OneHookClient; use createOneHookApiClient (SigV4 + transport)' });
       }
     }
     if (/\bXMLHttpRequest\b/.test(lx.skel)) {
-      problems.push({ file, line: lineOf(text, lx.skel.search(/\bXMLHttpRequest\b/)), reason: 'uses XMLHttpRequest; outbound HTTP must go through fetch' });
+      problems.push({ file, line: lineOf(text, lx.skel.search(/\bXMLHttpRequest\b/)), reason: 'uses XMLHttpRequest' });
     }
-    // `fetch` itself may only be called, used as a type, or be the default of a `typeof fetch` parameter.
-    for (const m of lx.skel.matchAll(/(?<![\w$])fetch(?![\w$])/g)) {
-      const before = lx.skel.slice(Math.max(0, m.index! - 60), m.index!);
-      const after = lx.skel.slice(m.index! + 5);
-      if (/\btypeof\s+$/.test(before)) continue;
-      if (/^\s*\(/.test(after)) continue;
-      if (/\btypeof\s+fetch\s*=\s*$/.test(before)) continue;
-      problems.push({ file, line: lineOf(text, m.index!), reason: '`fetch` is passed around in a way the scan cannot follow; call it, or take it as a `typeof fetch` parameter' });
-    }
-
-    for (const alias of aliases) {
-      for (const m of lx.skel.matchAll(new RegExp(`(?<![\\w$])${escapeRe(alias)}\\s*\\(`, 'g'))) {
-        const open = m.index! + m[0].length - 1;
-        const line = lineOf(text, m.index!);
-        const fail = (reason: string) => problems.push({ file, line, reason: `outbound call \`${alias}(...)\`: ${reason}` });
-        const args = callArgs(lx, open);
-        if (!args || args.length < 1) { fail('cannot read its arguments'); continue; }
-        const urlArg = /^([\w$]+)(?:\.toString\(\)|\.href)?$/.exec(args[0]!.text);
-        if (!urlArg) { fail(`the URL \`${args[0]!.text}\` is not a \`const\` URL variable`); continue; }
-        const ident = urlArg[1]!;
-        const decls = [...lx.skel.slice(0, m.index!).matchAll(new RegExp(`\\bconst\\s+${escapeRe(ident)}\\s*(?::[^=;]+)?=\\s*new\\s+URL\\s*\\(`, 'g'))];
-        const decl = decls[decls.length - 1];
-        if (!decl) { fail(`no \`const ${ident} = new URL(...)\` before it`); continue; }
-        const between = lx.skel.slice(decl.index!, m.index!);
-        if (URL_MUTATION.test(between.replace(new RegExp(`^[\\s\\S]*?new\\s+URL`), ''))) {
-          fail(`\`${ident}\` is changed between \`new URL\` and the call`); continue;
+    if (file !== SDK_TRANSPORT_FILE) {
+      for (const alias of aliases) {
+        for (const m of lx.skel.matchAll(new RegExp(`(?<![\\w$.])${escapeRe(alias)}\\s*\\(|\\.${escapeRe(alias)}\\s*\\(`, 'g'))) {
+          problems.push({ file, line: lineOf(text, m.index!), reason: `\`${alias}(...)\` outside ${SDK_TRANSPORT_FILE}: call the service through its generated client` });
         }
-        const urlArgs = callArgs(lx, decl.index! + decl[0].length - 1);
-        if (!urlArgs || urlArgs.length !== 1) { fail(`\`new URL(...)\` for \`${ident}\` must take one template argument`); continue; }
-        const lit = literal(lx, urlArgs[0]!);
-        const head = lit?.parts[0];
-        const base = lit?.parts[1];
-        if (!lit || lit.escaped || !head || !('text' in head) || head.text !== '' || !base || !('expr' in base) || !/^[\w$.]+$/.test(base.expr)) {
-          fail(`the URL must be \`\${<baseUrl>}/<path>\`, got \`${urlArgs[0]!.text}\``); continue;
-        }
-        const rest = lit.parts.slice(2).map((p) => ('text' in p ? p.text : '\u0000')).join('');
-        const rawRest = lit.parts.slice(2).map((p) => ('text' in p ? p.text : `\${${p.expr}}`)).join('');
-        const pathOnly = rest.split('?')[0]!;
-        if (!pathOnly.startsWith('/')) { fail(`the path \`${rawRest}\` does not start with /`); continue; }
-        const segments = pathOnly.split('/').slice(1);
-        if (segments.some((s) => s.includes('\u0000') && s !== '\u0000')) {
-          fail(`\`${rawRest}\`: an interpolation must be a whole path segment`); continue;
-        }
-        const normalized = '/' + segments.map((s) => (s === '\u0000' ? '{}' : s)).join('/');
-        if (!/^(\/([A-Za-z0-9_.\-]+|\{\}))+$/.test(normalized)) { fail(`cannot read the path \`${rawRest}\``); continue; }
-
-        const init = args[1];
-        const methods = init && init.text.startsWith('{') ? [...init.text.matchAll(/\bmethod\s*:\s*(['"])([A-Z]+)\1/g)] : [];
-        if (methods.length !== 1) { fail('its init must be an object literal with one literal `method`'); continue; }
-        const method = methods[0]![2]!;
-
-        // auth: iam needs a SigV4 signature over the same method and URL before the call.
-        const urlProp = ident === 'url' ? /(?:^|[{,\s])url\s*(?=[,}])|\burl\s*:\s*url\b/ : new RegExp(`\\burl\\s*:\\s*${escapeRe(ident)}\\b`);
-        let signed = false;
-        for (const s of lx.skel.slice(decl.index!, m.index!).matchAll(/\.\s*sign\s*\(/g)) {
-          const signOpen = decl.index! + s.index! + s[0].length - 1;
-          const signArg = callArgs(lx, signOpen)?.[0];
-          if (signArg && signArg.text.startsWith('{')
-            && new RegExp(`\\bmethod\\s*:\\s*(['"])${method}\\1`).test(signArg.text)
-            && urlProp.test(signArg.text)) {
-            signed = true;
-          }
-        }
-        if (!signed) { fail(`no \`.sign({ method: '${method}', url: ${ident}, ... })\` between \`new URL\` and the call (auth: iam)`); continue; }
-
-        calls.push({ file, line, method, rawPath: rawRest, path: normalized });
       }
+      for (const m of lx.skel.matchAll(/(?<![\w$])fetch(?![\w$])/g)) {
+        const before = lx.skel.slice(Math.max(0, m.index! - 60), m.index!);
+        const after = lx.skel.slice(m.index! + 5);
+        if (/\btypeof\s+$/.test(before) || /\btypeof\s+fetch\s*=\s*$/.test(before) || /^\s*\(/.test(after)) continue;
+        if (/[:,(]\s*$/.test(before) && /^\s*[,)]/.test(after)) continue; // passed on as the SDK transport
+        problems.push({ file, line: lineOf(text, m.index!), reason: '`fetch` is used in a way the scan cannot follow' });
+      }
+    }
+
+    // Values typed `OneHook` (fields, parameters, variables), and every `<value>.<operation>(` on them.
+    const receivers = new Set<string>();
+    for (const m of lx.skel.matchAll(/([\w$]+)\s*\??\s*:\s*OneHook\b(?![\w$])/g)) receivers.add(m[1]!);
+    for (const m of lx.skel.matchAll(/\b(?:const|let)\s+([\w$]+)\s*=\s*createOneHookApiClient\s*\(/g)) receivers.add(m[1]!);
+    for (const r of receivers) {
+      for (const m of lx.skel.matchAll(new RegExp(`(?<![\\w$])(?:this\\.)?${escapeRe(r)}\\s*\\.\\s*([a-z][A-Za-z0-9]*)\\s*\\(`, 'g'))) {
+        const method = m[1]!;
+        if (method === 'send' || method === 'destroy' || method === 'middlewareStack') {
+          problems.push({ file, line: lineOf(text, m.index!), reason: `\`${r}.${method}(\` cannot be read as an operation; call the operation method` });
+          continue;
+        }
+        calls.push({ file, line: lineOf(text, m.index!), operationId: method[0]!.toUpperCase() + method.slice(1) });
+      }
+    }
+    // `new XCommand(...)` for a command imported from onehook-api-client (AWS SDK commands are not ours).
+    const sdkImports = new Set<string>();
+    for (const m of lx.code.matchAll(/\bimport\s*(?:type\s*)?\{([^}]*)\}\s*from\s*['"]onehook-api-client['"]/g)) {
+      for (const name of m[1]!.split(',')) sdkImports.add(name.trim().split(/\s+as\s+/).pop()!.replace(/^type\s+/, ''));
+    }
+    for (const m of lx.skel.matchAll(/\bnew\s+([A-Z][A-Za-z0-9]*)Command\s*\(/g)) {
+      if (sdkImports.has(`${m[1]}Command`)) calls.push({ file, line: lineOf(text, m.index!), operationId: m[1]! });
     }
   }
   return { calls, problems };

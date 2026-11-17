@@ -1,0 +1,29 @@
+{
+    "version": "1.0",
+    "sources": [
+        "model"
+    ],
+    "maven": {
+        "dependencies": [
+            "software.amazon.smithy:smithy-model:1.51.0",
+            "software.amazon.smithy:smithy-openapi:1.51.0",
+            "software.amazon.smithy:smithy-aws-traits:1.51.0",
+            "software.amazon.smithy.typescript:smithy-typescript-codegen:0.29.1",
+            "software.amazon.smithy.typescript:smithy-aws-typescript-codegen:0.29.1"
+        ]
+    },
+    "plugins": {
+        "openapi": {
+            "service": "club.onehook.mronehook#MrOneHookService",
+            "format": "json",
+            "useIntegerType": true
+        },
+        "typescript-codegen": {
+            "service": "club.onehook.mronehook#MrOneHookService",
+            "package": "onehook-mr-onehook-client",
+            "packageVersion": "0.0.0",
+            "packageDescription": "Mr OneHook API client",
+            "requiredMemberMode": "strict"
+        }
+    }
+}

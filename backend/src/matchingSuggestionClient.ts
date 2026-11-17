@@ -20,12 +20,13 @@ import type { MatchingStatusReader } from './matchingStatusClient';
  * The prompt is never logged.
  */
 
-export type SuggestionStatus = 'RECORDED' | 'PREMIUM_REQUIRED' | 'MATCHING_OFF' | 'UNAVAILABLE';
-
-export interface MatchSuggestion {
-  prompt: string;
-  reasoning: string;
-}
+// The outcome is this API's `SuggestionStatus` (mr-onehook.smithy); the suggestion itself is what
+// Matching's RecordSuggestionInternal takes (matching.smithy, onehook-api-client).
+export type { SuggestionStatus } from './generated/mrOneHookModels';
+import type { SuggestionStatus } from './generated/mrOneHookModels';
+import type { OneHook, RecordSuggestionInternalRequest } from 'onehook-api-client';
+import { createOneHookApiClient, errorCodeOf, httpStatusOf } from './oneHookApiClient';
+export type MatchSuggestion = Pick<RecordSuggestionInternalRequest, 'prompt' | 'reasoning'>;
 
 /** The member a suggestion is for, as verified from their own token. */
 export interface SuggestionMember {
@@ -61,13 +62,17 @@ export function sanitizeMatchSuggestion(value: unknown): MatchSuggestion | null 
 }
 
 export class MatchingSuggestionClient implements SuggestionRecorder {
+  private readonly api: OneHook;
+
   constructor(
-    private readonly baseUrl: string,
-    private readonly signer: RequestSigner,
-    private readonly timeoutMs: number,
+    baseUrl: string,
+    signer: RequestSigner,
+    timeoutMs: number,
     private readonly matchingStatus: MatchingStatusReader,
-    private readonly fetchImpl: typeof fetch = fetch,
-  ) {}
+    fetchImpl: typeof fetch = fetch,
+  ) {
+    this.api = createOneHookApiClient({ baseUrl, signer, timeoutMs, fetchImpl });
+  }
 
   async record(member: SuggestionMember, suggestion: MatchSuggestion): Promise<SuggestionStatus> {
     if (!member.idToken || !member.userId) return 'UNAVAILABLE';
@@ -78,41 +83,22 @@ export class MatchingSuggestionClient implements SuggestionRecorder {
       // Could not confirm matching is ON: record nothing.
       return 'UNAVAILABLE';
     }
-    const url = new URL(`${this.baseUrl}/matching/internal/suggestions`);
-    const body = JSON.stringify(suggestion);
-    let response: Response;
     try {
-      const headers = await this.signer.sign({
-        method: 'POST',
-        url,
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json',
-          'x-onehook-member-token': member.idToken,
-        },
-        body,
-      });
-      response = await this.fetchImpl(url.toString(), {
-        method: 'POST',
-        headers,
-        body,
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
-    } catch {
-      // Signing (no AWS credentials) or network failure: nothing recorded.
-      return 'UNAVAILABLE';
-    }
-    if (response.status === 200 || response.status === 201) return 'RECORDED';
-    if (response.status === 403) {
+      // Matching's `RecordSuggestionInternal`; Matching derives the member from their own ID token.
+      await this.api.recordSuggestionInternal({ memberToken: member.idToken, ...suggestion });
+      return 'RECORDED';
+    } catch (error: unknown) {
       // 403 is PREMIUM_REQUIRED (tier gate), MATCHING_OFF (Matching holds no row for the member, e.g. an
       // opt-out raced the status read) or an IAM denial; only the first two carry a code. OneHook errors are
-      // `{error: <human message>, code: <MACHINE_CODE>}`: the code is `code`, never `error`.
-      const code = await response.json().then((b: unknown) => (b as { code?: unknown })?.code).catch(() => undefined);
-      if (code === 'PREMIUM_REQUIRED') return 'PREMIUM_REQUIRED';
-      if (code === 'MATCHING_OFF') return 'MATCHING_OFF';
+      // `{error: <human message>, code: <MACHINE_CODE>}`: the code is `code`, never `error`. Signing (no AWS
+      // credentials), network and every other failure: nothing recorded.
+      if (httpStatusOf(error) === 403) {
+        const code = errorCodeOf(error);
+        if (code === 'PREMIUM_REQUIRED') return 'PREMIUM_REQUIRED';
+        if (code === 'MATCHING_OFF') return 'MATCHING_OFF';
+      }
       return 'UNAVAILABLE';
     }
-    return 'UNAVAILABLE';
   }
 }
 

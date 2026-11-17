@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc",
+    "build": "npm run clean && node node_modules/typescript/bin/tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "test": "npm run build && node --test dist/__tests__/*.test.js"
@@ -29,7 +29,7 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jose": "5.10.0",
-    "onehook-api-client": "1.0.33",
+    "onehook-api-client": "1.0.44",
     "openai": "^7.4.0"
   },
   "devDependencies": {
@@ -37,6 +37,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.2",
     "ts-node": "^10.9.2",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "typescript-api": "npm:typescript@^5.8.3"
   }
 }

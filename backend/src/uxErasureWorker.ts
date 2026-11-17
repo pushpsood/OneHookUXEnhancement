@@ -1,3 +1,4 @@
+import { EventSources, EventTypes, type UserDeletedDetail } from 'onehook-api-client/events';
 import {
   ChangeMessageVisibilityCommand,
   DeleteMessageCommand,
@@ -68,8 +69,9 @@ export type ParsedErasureMessage =
 
 export type MessageOutcome = 'erased' | 'not-ours' | 'malformed' | 'failed';
 
-export const USER_DELETED_SOURCE = 'club.onehook.profile';
-export const USER_DELETED_DETAIL_TYPE = 'UserDeleted';
+/** The OneHook event catalog and detail types (onehook-api-client/events, generated from events.smithy). */
+export const USER_DELETED_SOURCE = EventSources.PROFILE;
+export const USER_DELETED_DETAIL_TYPE = EventTypes.USER_DELETED;
 /** The queue's redrive policy (OneHookBackend matching-stack.ts): the 5th failed receive goes to the DLQ. */
 export const DEFAULT_MAX_RECEIVE_COUNT = 5;
 
@@ -98,7 +100,9 @@ export function parseUserDeletedMessage(body: string): ParsedErasureMessage {
   if (event.source !== USER_DELETED_SOURCE || event['detail-type'] !== USER_DELETED_DETAIL_TYPE) {
     return { kind: 'not-ours' };
   }
-  const userId = isRecord(event.detail) ? event.detail.userId : undefined;
+  // The detail is the generated `UserDeletedDetail`; it is still checked, because the queue is untrusted input.
+  const detail = isRecord(event.detail) ? (event.detail as Partial<Record<keyof UserDeletedDetail, unknown>>) : undefined;
+  const userId = detail?.userId;
   // Same bound as a verified token subject (auth.ts): the ids Mr OneHook stores data under.
   // eslint-disable-next-line no-control-regex
   if (typeof userId !== 'string' || userId.length < 1 || userId.length > 256 || /[\s\u0000-\u001f\u007f]/.test(userId)) {

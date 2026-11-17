@@ -1,0 +1,68 @@
+name: Mr OneHook SDK
+
+# Builds onehook-mr-onehook-client from sdk/model/*.smithy (the source of truth of the Mr OneHook API),
+# tests the package, and checks the committed copies the backend's contract tests read. On main it then
+# bumps the patch version, publishes to npm with OIDC trusted publishing (no npm token stored) and tags
+# the release `sdk-v<version>`.
+#
+# One-time npm setup (as for onehook-api-client): npmjs.com -> onehook-mr-onehook-client -> Settings -> Trusted publishing
+# -> GitHub Actions: user `pushpsood`, repository `OneHookUXEnhancement`, workflow `sdk.yml`, no environment, and allow
+# `npm publish`. The first publish must run within 2 days of saving it. npm adds provenance itself when the
+# repository is public, so the publish step passes no --provenance flag (it would fail on a private repo).
+
+on:
+  pull_request:
+    paths: ['sdk/**', 'backend/src/__tests__/contract/**', 'backend/src/generated/mrOneHookApiManifest.ts', '.github/workflows/sdk.yml']
+  push:
+    branches: [main]
+    paths: ['sdk/**', '.github/workflows/sdk.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: mr-onehook-sdk
+  cancel-in-progress: false
+
+jobs:
+  sdk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'corretto'
+          cache: 'maven'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Build
+        working-directory: sdk
+        run: npm run build
+      - name: Test the package
+        working-directory: sdk
+        run: npm test
+      - name: Committed copies match the model
+        working-directory: sdk
+        run: npm run manifest:check-sync
+
+      - name: Bump, publish and tag
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        working-directory: sdk
+        run: |
+          # npm OIDC trusted publishing needs npm >= 11.5.1.
+          npm install -g npm@latest
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version patch --no-git-tag-version
+          VERSION=$(node -p "require('./package.json').version")
+          npm run build
+          npm test
+          npm --prefix build/package publish --access public
+          git add package.json
+          git commit -m "chore(release): onehook-mr-onehook-client@${VERSION}"
+          git tag "sdk-v${VERSION}"
+          git push origin HEAD:main "sdk-v${VERSION}"

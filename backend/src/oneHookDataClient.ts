@@ -1,3 +1,5 @@
+import type { OneHook } from 'onehook-api-client';
+import { createOneHookApiClient, httpStatusOf, OneHookSigningError } from './oneHookApiClient';
 import { MATCHING_PROFILE_FIELDS, type AiVisibleMatchContext, type AiVisibleProfile } from './contextTypes';
 
 /**
@@ -98,21 +100,10 @@ export function visibleProfilesForPair(
 }
 
 export class OneHookDataClient {
-  private readonly baseUrl: string;
-  private readonly signer: RequestSigner;
-  private readonly timeoutMs: number;
-  private readonly fetchImpl: typeof fetch;
+  private readonly api: OneHook;
 
-  private constructor(
-    baseUrl: string,
-    signer: RequestSigner,
-    timeoutMs: number,
-    fetchImpl: typeof fetch,
-  ) {
-    this.baseUrl = baseUrl;
-    this.signer = signer;
-    this.timeoutMs = timeoutMs;
-    this.fetchImpl = fetchImpl;
+  private constructor(baseUrl: string, signer: RequestSigner, timeoutMs: number, fetchImpl: typeof fetch) {
+    this.api = createOneHookApiClient({ baseUrl, signer, timeoutMs, fetchImpl });
   }
 
   /**
@@ -129,37 +120,25 @@ export class OneHookDataClient {
     return new OneHookDataClient(baseUrl, signer, timeoutMs, fetchImpl);
   }
 
+  /** State's `GetAiContextMatch`, through the generated onehook-api-client (./oneHookApiClient.ts). */
   async getAiVisibleMatch(userId: string, matchId: string): Promise<AiVisibleMatchContext> {
-    const url = new URL(`${this.baseUrl}/api/ai-context/matches/${encodeURIComponent(matchId)}`);
-    const baseHeaders: Record<string, string> = {
-      'x-onehook-user-id': userId,
-      accept: 'application/json',
-    };
-
-    let headers: Record<string, string>;
+    let body: unknown;
     try {
-      headers = await this.signer.sign({ method: 'GET', url, headers: baseHeaders });
+      body = await this.api.getAiContextMatch({ matchId, requestingUserId: userId });
     } catch (error: unknown) {
-      // A signer failure (e.g. no resolvable AWS credentials) is a configuration/availability
-      // problem, not a per-match authorization decision — surface it as unavailable, never as if the
-      // match simply does not exist.
-      throw new MatchContextUnavailableError(
-        `Failed to sign data-service request: ${error instanceof Error ? error.message : 'unknown error'}`,
-      );
+      if (error instanceof OneHookSigningError) {
+        // A signer failure (e.g. no resolvable AWS credentials) is a configuration/availability
+        // problem, not a per-match authorization decision: surface it as unavailable, never as if the
+        // match simply does not exist.
+        throw new MatchContextUnavailableError(`Failed to sign data-service request: ${error.message}`);
+      }
+      const status = httpStatusOf(error);
+      if (status === 403 || status === 404) throw new MatchContextAccessError('Match is not available');
+      throw new MatchContextUnavailableError(status !== undefined
+        ? `Data service returned ${status}`
+        : `Data service request failed: ${error instanceof Error ? error.name : 'unknown error'}`);
     }
 
-    const response = await this.fetchImpl(url.toString(), {
-      method: 'GET',
-      headers,
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-
-    if (response.status === 403 || response.status === 404) {
-      throw new MatchContextAccessError('Match is not available');
-    }
-    if (!response.ok) throw new MatchContextUnavailableError(`Data service returned ${response.status}`);
-
-    const body: unknown = await response.json();
     if (!isRecord(body) || body.matchId !== matchId || body.status !== 'active') {
       throw new MatchContextAccessError('Match is not active');
     }
