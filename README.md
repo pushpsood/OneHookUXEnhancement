@@ -535,8 +535,8 @@ npm test                     # package tests
 npm run manifest:sync        # refresh the committed copies after a model change
 ```
 
-`.github/workflows/sdk.yml` builds and tests it on pull requests and, on `main`, bumps the patch version in
-`sdk/package.json`, publishes with npm OIDC trusted publishing and tags `sdk-v<version>`. One-time setup:
+`.github/workflows/sdk.yml` builds and tests it on pull requests and, on `main`, sets the version in
+`sdk/package.json` from what changed (`sdk/scripts/api-compat.mjs`: breaking = major, addition = minor, else patch; the 2.x line starts with this check), publishes with npm OIDC trusted publishing and tags `sdk-v<version>`. One-time setup:
 register the repository and `sdk.yml` as a trusted publisher of `onehook-mr-onehook-client` on npmjs.com.
 `deploy.yml` also builds the SDK before the backend tests, so the server is always checked against the
 model it publishes.
