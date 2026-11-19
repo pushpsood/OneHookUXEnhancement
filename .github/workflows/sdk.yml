@@ -2,7 +2,7 @@ name: Mr OneHook SDK
 
 # Builds onehook-mr-onehook-client from sdk/model/*.smithy (the source of truth of the Mr OneHook API),
 # tests the package, and checks the committed copies the backend's contract tests read. On main it then
-# bumps the patch version, publishes to npm with OIDC trusted publishing (no npm token stored) and tags
+# picks the next version from what changed (scripts/api-compat.mjs: breaking = major, addition = minor), publishes to npm with OIDC trusted publishing (no npm token stored) and tags
 # the release `sdk-v<version>`.
 #
 # One-time npm setup (as for onehook-api-client): npmjs.com -> onehook-mr-onehook-client -> Settings -> Trusted publishing
@@ -57,8 +57,11 @@ jobs:
           npm install -g npm@latest
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          npm version patch --no-git-tag-version
-          VERSION=$(node -p "require('./package.json').version")
+          # Semantic version from what changed since the latest published version (scripts/api-compat.mjs):
+          # breaking -> major, addition -> minor, else patch. OneHookPlatform takes every minor and patch
+          # automatically. --min-major 2: the first version with this check starts the 2.x line.
+          VERSION=$(node scripts/api-compat.mjs next --package onehook-mr-onehook-client --new build/package --min-major 2)
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
           npm run build
           npm test
           npm publish ./build/package --access public
