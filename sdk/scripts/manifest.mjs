@@ -79,7 +79,8 @@ export function generateManifest(model, config) {
     [
       `${c} GENERATED FILE - DO NOT EDIT.`,
       `${c} Source of truth: ${config.repo}/sdk/model/*.smithy, published as ${config.packageName}.`,
-      `${c} Regenerate: (${config.repo}/sdk) npm run build && npm run manifest:sync`,
+      `${c} Regenerate: (${config.repo}/sdk) npm run build && npm run manifest:sync.`,
+      `${c} iOS / Android copies: pulled from ${config.packageName} (manifest/) by OneHookPlatform scripts/sync-api-specs.mjs.`,
     ].join('\n');
   const swiftRows = ops.map(
     (o) => `        .init(operationId: ${q(o.operationId)}, method: ${q(o.method)}, path: ${q(o.path)}, service: ${q(o.service)}, auth: ${q(o.auth)}),`

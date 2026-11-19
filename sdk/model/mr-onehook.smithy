@@ -344,6 +344,9 @@ structure GetChatSessionResponse {
 structure ChatSessionDetail {
     @required
     sessionId: String,
+    /// `connection` when the session is about a match (`matchId` is set), else `product`.
+    @required
+    scope: ChatSessionScope,
     /// Connection sessions only.
     matchId: String,
     /// ISO-8601.
@@ -355,6 +358,9 @@ structure ChatSessionDetail {
     /// ISO-8601.
     @required
     expiresAt: String,
+    /// Messages in `messages` (the tier's window of the stored conversation).
+    @required
+    messageCount: Integer,
     @required
     messages: ChatSessionMessageList
 }
@@ -371,7 +377,9 @@ structure ChatSessionMessage {
     content: String,
     /// ISO-8601.
     @required
-    createdAt: String
+    createdAt: String,
+    /// The mood Mr OneHook answered with. Assistant turns only; absent on turns saved before it was stored.
+    mood: Mood
 }
 
 enum ChatSessionRole {

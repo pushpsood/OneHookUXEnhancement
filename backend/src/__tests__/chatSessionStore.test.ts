@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import type { ContainerClient } from '@azure/storage-blob';
 import {
   ChatSessionAccessError,
@@ -132,6 +133,28 @@ test('plaintext AI chat sessions enforce user, match, idempotency, and tier boun
     [...container.blobs.keys()].filter((name) => name.startsWith('sessions/')).length,
     0,
   );
+});
+
+test('the assistant turn keeps its mood; a stored mood outside the model is dropped when read', async () => {
+  const container = new MemoryContainer();
+  const store = new PlaintextChatSessionStore(container as unknown as ContainerClient);
+  const saved = await store.appendExchange({
+    subject: 'cognito-user-mood',
+    exchangeId: randomUUID(),
+    userMessage: 'hello',
+    assistantMessage: 'hi there',
+    assistantMood: 'Excited',
+    policy,
+  });
+  assert.deepEqual(saved.messages.map((m) => [m.role, m.mood]), [['user', undefined], ['assistant', 'Excited']]);
+  const read = await store.get('cognito-user-mood', saved.sessionId);
+  assert.equal(read?.messages[1]?.mood, 'Excited');
+  assert.equal(read?.messages[0]?.mood, undefined, 'user turns carry no mood');
+
+  const [name, blob] = [...container.blobs.entries()].find(([n]) => n.startsWith('sessions/'))!;
+  container.blobs.set(name, Buffer.from(blob.toString('utf8').replace('"Excited"', '"Furious"')));
+  const tampered = await store.get('cognito-user-mood', saved.sessionId);
+  assert.equal(tampered?.messages[1]?.mood, undefined);
 });
 
 test('product-only sessions are isolated from every match scope', async () => {

@@ -6,7 +6,11 @@ import type {
   ChatSessionDetail,
   ChatSessionMessage as WireChatSessionMessage,
   ChatSessionSummary,
+  Mood,
 } from './generated/mrOneHookModels';
+
+/** Every `Mood` of the model; a stored mood outside it is dropped when read. */
+const MOODS: ReadonlySet<string> = new Set<Mood>(['Happy', 'Neutral', 'Thinking', 'Sad', 'Excited']);
 
 // The stored session is the API's `ChatSessionDetail` plus storage-only fields; the summary is the
 // API's `ChatSessionSummary` (mr-onehook.smithy).
@@ -15,8 +19,11 @@ export type { ChatSessionSummary };
 /** A stored turn: the API's `ChatSessionMessage` plus the exchange it belongs to (idempotency). */
 export type ChatSessionMessage = WireChatSessionMessage & { exchangeId: string };
 
-/** A stored session: the API's `ChatSessionDetail` with stored turns. */
-export type ChatSession = Omit<ChatSessionDetail, 'messages'> & { messages: ChatSessionMessage[] };
+/**
+ * A stored session: the API's `ChatSessionDetail` with stored turns. `scope` and `messageCount` are not
+ * stored: the route derives them (from `matchId` and from the window of turns it returns).
+ */
+export type ChatSession = Omit<ChatSessionDetail, 'messages' | 'scope' | 'messageCount'> & { messages: ChatSessionMessage[] };
 
 interface SessionRecord {
   schemaVersion: 1;
@@ -91,11 +98,15 @@ function parseSession(value: unknown): ChatSession {
       || candidate.exchangeId.length > 128) {
       throw new Error('Invalid plaintext session message');
     }
+    const mood = candidate.role === 'assistant' && typeof candidate.mood === 'string' && MOODS.has(candidate.mood)
+      ? { mood: candidate.mood as Mood }
+      : {};
     return {
       role: candidate.role,
       content: candidate.content,
       createdAt: new Date(candidate.createdAt).toISOString(),
       exchangeId: candidate.exchangeId,
+      ...mood,
     };
   });
   return {
@@ -324,6 +335,8 @@ export class PlaintextChatSessionStore {
     exchangeId: string;
     userMessage: string;
     assistantMessage: string;
+    /** The mood of the assistant turn, stored with it so a reopened session shows it. */
+    assistantMood?: Mood;
     policy: ChatSessionTierPolicy;
   }): Promise<ChatSession> {
     const sessionId = input.sessionId ?? input.exchangeId;
@@ -349,7 +362,13 @@ export class PlaintextChatSessionStore {
         const messages = [
           ...(existing?.record.session.messages ?? []),
           { role: 'user' as const, content: input.userMessage, createdAt: now, exchangeId: input.exchangeId },
-          { role: 'assistant' as const, content: input.assistantMessage, createdAt: now, exchangeId: input.exchangeId },
+          {
+            role: 'assistant' as const,
+            content: input.assistantMessage,
+            createdAt: now,
+            exchangeId: input.exchangeId,
+            ...(input.assistantMood ? { mood: input.assistantMood } : {}),
+          },
         ].slice(-effectiveMaxMessages);
         const session: ChatSession = {
           sessionId,

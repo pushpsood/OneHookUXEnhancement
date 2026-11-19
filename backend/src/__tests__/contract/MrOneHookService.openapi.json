@@ -556,6 +556,9 @@
                     "sessionId": {
                         "type": "string"
                     },
+                    "scope": {
+                        "$ref": "#/components/schemas/ChatSessionScope"
+                    },
                     "matchId": {
                         "type": "string",
                         "description": "Connection sessions only."
@@ -572,6 +575,11 @@
                         "type": "string",
                         "description": "ISO-8601."
                     },
+                    "messageCount": {
+                        "type": "integer",
+                        "description": "Messages in `messages` (the tier's window of the stored conversation).",
+                        "format": "int32"
+                    },
                     "messages": {
                         "type": "array",
                         "items": {
@@ -582,7 +590,9 @@
                 "required": [
                     "createdAt",
                     "expiresAt",
+                    "messageCount",
                     "messages",
+                    "scope",
                     "sessionId",
                     "updatedAt"
                 ]
@@ -627,6 +637,9 @@
                     "createdAt": {
                         "type": "string",
                         "description": "ISO-8601."
+                    },
+                    "mood": {
+                        "$ref": "#/components/schemas/Mood"
                     }
                 },
                 "required": [
