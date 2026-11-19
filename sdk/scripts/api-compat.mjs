@@ -265,7 +265,9 @@ function packed(name, version) {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
   });
-  const [info] = JSON.parse(out);
+  // npm <= 11 prints an array of results, npm 12 an object keyed by package name.
+  const parsed = JSON.parse(out);
+  const info = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
   execFileSync('tar', ['-xzf', join(work, info.filename), '-C', work]);
   return { dir: join(work, 'package'), cleanup: () => rmSync(work, { recursive: true, force: true }) };
 }
