@@ -172,7 +172,7 @@ function session(sessionId: string, matchId?: string): ChatSession {
     expiresAt: '2026-12-05T00:00:00.000Z',
     messages: [
       { role: 'user', content: 'hello', createdAt: NOW, exchangeId: 'e1' },
-      { role: 'assistant', content: 'hi there', createdAt: NOW, exchangeId: 'e1' },
+      { role: 'assistant', content: 'hi there', createdAt: NOW, exchangeId: 'e1', mood: 'Happy' },
     ],
   };
 }

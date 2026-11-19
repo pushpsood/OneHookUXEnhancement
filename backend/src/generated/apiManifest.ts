@@ -1,6 +1,7 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source of truth: OneHookBackend/packages/api-models/model/smithy/*.smithy (every HTTP route is a Smithy operation).
-// Regenerate: (OneHookBackend) npm --prefix packages/api-models run build && npm run api:sync
+// Regenerate: (OneHookBackend) npm --prefix packages/api-models run build && npm run api:sync.
+// iOS / Android copies: pulled from onehook-api-client (manifest/) by OneHookPlatform scripts/sync-api-specs.mjs.
 /* eslint-disable */
 
 export type ApiAuth = 'cognito' | 'iam' | 'none';

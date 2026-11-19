@@ -1,6 +1,7 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source of truth: OneHookUXEnhancement/sdk/model/*.smithy, published as onehook-mr-onehook-client.
-// Regenerate: (OneHookUXEnhancement/sdk) npm run build && npm run manifest:sync
+// Regenerate: (OneHookUXEnhancement/sdk) npm run build && npm run manifest:sync.
+// iOS / Android copies: pulled from onehook-mr-onehook-client (manifest/) by OneHookPlatform scripts/sync-api-specs.mjs.
 /* eslint-disable */
 
 export type ApiAuth = 'cognito' | 'none' | 'session';

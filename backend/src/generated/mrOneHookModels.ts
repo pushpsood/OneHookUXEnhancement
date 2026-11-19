@@ -25,6 +25,7 @@ export interface BadRequestErrorResponseContent {
 
 export interface ChatSessionDetail {
   sessionId: string;
+  scope: ChatSessionScope;
   /** Connection sessions only. */
   matchId?: string;
   /** ISO-8601. */
@@ -33,6 +34,8 @@ export interface ChatSessionDetail {
   updatedAt: string;
   /** ISO-8601. */
   expiresAt: string;
+  /** Messages in `messages` (the tier's window of the stored conversation). */
+  messageCount: number;
   messages: ChatSessionMessage[];
 }
 
@@ -53,6 +56,7 @@ export interface ChatSessionMessage {
   content: string;
   /** ISO-8601. */
   createdAt: string;
+  mood?: Mood;
 }
 
 export type ChatSessionRole = "user" | "assistant";

@@ -16,6 +16,7 @@ import {
   type ContextualModelResponse,
 } from './contextPrompt';
 import { parseContextualChatInput } from './contextTypes';
+import type { ChatSessionDetail } from './generated/mrOneHookModels';
 import { disabledSuggestionRecorder, type SuggestionRecorder, type SuggestionStatus } from './matchingSuggestionClient';
 import {
   MatchContextAccessError,
@@ -238,6 +239,7 @@ export function createContextualRouter(
               exchangeId: requestId,
               userMessage: input.message,
               assistantMessage: result.reply,
+              assistantMood: result.mood,
               policy: sessionPolicy,
             })
           : undefined;
@@ -359,22 +361,20 @@ export function createContextualRouter(
         if (session.matchId) {
           await services.dataClient.getAiVisibleMatch(req.auth!.subject, session.matchId);
         }
-        res.json({
-          session: {
-            sessionId: session.sessionId,
-            ...(session.matchId ? { matchId: session.matchId } : {}),
-            createdAt: session.createdAt,
-            updatedAt: session.updatedAt,
-            expiresAt: session.expiresAt,
-            messages: session.messages
-              .slice(-(policy.maxMessages - (policy.maxMessages % 2)))
-              .map(({ role, content, createdAt }) => ({
-              role,
-              content,
-              createdAt,
-            })),
-          },
-        });
+        const messages = session.messages
+          .slice(-(policy.maxMessages - (policy.maxMessages % 2)))
+          .map(({ role, content, createdAt, mood }) => ({ role, content, createdAt, ...(mood ? { mood } : {}) }));
+        const detail: ChatSessionDetail = {
+          sessionId: session.sessionId,
+          scope: session.matchId ? 'connection' : 'product',
+          ...(session.matchId ? { matchId: session.matchId } : {}),
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          expiresAt: session.expiresAt,
+          messageCount: messages.length,
+          messages,
+        };
+        res.json({ session: detail });
       } catch (error: unknown) {
         if (error instanceof ChatSessionAccessError || error instanceof MatchContextAccessError) {
           res.status(404).json({ error: 'CHAT_SESSION_NOT_FOUND' });
