@@ -29,7 +29,7 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jose": "5.10.0",
-    "onehook-api-client": "1.0.44",
+    "onehook-api-client": "2.0.0",
     "openai": "^7.4.0"
   },
   "devDependencies": {
