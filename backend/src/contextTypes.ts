@@ -15,9 +15,7 @@ export type { EphemeralMessageExcerpt, Mood };
 
 export interface AuthenticatedPrincipal {
   subject: string;
-  /** Wire value from onehook-api-client, set only when the tier has a session policy. */
-  tier?: SubscriptionTier;
-  /** The verified token's membership tier for entitlements (missing/unknown = Must). Never from the client. */
+  /** The verified token's membership tier (missing/unknown = Must). Never from the client. */
   membership: SubscriptionTier;
   permissions: Set<string>;
 }
@@ -33,9 +31,9 @@ export interface ContextualChatInput {
   ephemeralMessageContext?: EphemeralMessageContext;
   contextRequestId?: string;
   persistSession: boolean;
-  /** At the session cap, replace the least recently active session instead of refusing. */
-  replaceLeastRecent?: boolean;
   sessionId?: string;
+  /** Attachment ids (UUIDs) to read for this turn, at most 3, without duplicates. */
+  attachmentIds: string[];
 }
 
 /**
@@ -90,7 +88,7 @@ function requiredString(record: Record<string, unknown>, key: string, maxLength 
   return value;
 }
 
-function isUuid(value: string): boolean {
+export function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
@@ -99,6 +97,7 @@ export function parseContextualChatInput(
   maxCharacters: number,
   maxEphemeralMessages = 30,
   maxEphemeralCharacters = 12000,
+  maxAttachments = 3,
 ): ContextualChatInput {
   if (!isRecord(value)) throw new Error('Invalid request body');
   const matchId = value.matchId === undefined ? undefined : requiredString(value, 'matchId', 256);
@@ -167,8 +166,20 @@ export function parseContextualChatInput(
   if (sessionOptions.sessionId !== undefined && sessionOptions.persist === false) {
     throw new Error('Cannot continue a session without persistence');
   }
+  // Deprecated: at the plan's cap the least recently active session is always replaced. Still validated.
   if (sessionOptions.replaceLeastRecent !== undefined && typeof sessionOptions.replaceLeastRecent !== 'boolean') {
     throw new Error('Invalid replaceLeastRecent option');
+  }
+  let attachmentIds: string[] = [];
+  if (value.attachmentIds !== undefined) {
+    if (!Array.isArray(value.attachmentIds)
+      || value.attachmentIds.length < 1
+      || value.attachmentIds.length > maxAttachments
+      || value.attachmentIds.some((id) => typeof id !== 'string' || !isUuid(id))) {
+      throw new Error('Invalid attachmentIds');
+    }
+    attachmentIds = [...new Set((value.attachmentIds as string[]).map((id) => id.toLowerCase()))];
+    if (attachmentIds.length !== value.attachmentIds.length) throw new Error('Duplicate attachmentIds');
   }
   const persistSession = sessionOptions.persist === true || typeof sessionOptions.sessionId === 'string';
 
@@ -181,6 +192,6 @@ export function parseContextualChatInput(
     ...(contextRequestId ? { contextRequestId } : {}),
     persistSession,
     ...(typeof sessionOptions.sessionId === 'string' ? { sessionId: sessionOptions.sessionId } : {}),
-    ...(sessionOptions.replaceLeastRecent === true ? { replaceLeastRecent: true } : {}),
+    attachmentIds,
   };
 }

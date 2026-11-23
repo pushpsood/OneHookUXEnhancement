@@ -1,32 +1,52 @@
-import { randomUUID } from 'node:crypto';
-import { Router, type NextFunction, type Request, type Response } from 'express';
+import { Router, type Request } from 'express';
 import type { AzureOpenAI } from 'openai';
 import { createJwtAuthenticator } from './auth';
-import { QuotaUnavailableError, unavailableChatQuota, type ChatQuota } from './chatQuota';
-import { PAID_SUBSCRIPTION_TIERS } from 'onehook-api-client/membership';
-import type { ContextualFeatureConfig, ChatSessionTierPolicy } from './contextConfig';
+import { FREE_DAILY_MESSAGES, QuotaUnavailableError, unavailableChatQuota, type ChatQuota } from './chatQuota';
+import type { ContextualFeatureConfig, ChatSessionPlanPolicy } from './contextConfig';
 import {
   ChatSessionAccessError,
   ChatSessionLimitError,
   type PlaintextChatSessionStore,
+  type StoredAttachmentRef,
 } from './plaintextChatSessionStore';
 import {
   buildContextualSystemPrompt,
   parseContextualModelResponse,
   type ContextualModelResponse,
+  type PromptAttachment,
 } from './contextPrompt';
 import { parseContextualChatInput } from './contextTypes';
-import type { ChatSessionDetail } from './generated/mrOneHookModels';
+import type { ChatSessionDetail, MrOneHookPlan } from './generated/mrOneHookModels';
 import { disabledSuggestionRecorder, type SuggestionRecorder, type SuggestionStatus } from './matchingSuggestionClient';
 import {
   MatchContextAccessError,
   MatchContextUnavailableError,
   type OneHookDataClient,
 } from './oneHookDataClient';
+import { createPrincipalRateLimiter, pathParam, requestIdFor, resolveEntitlement } from './memberRouting';
+import { ProStoreUnavailableError } from './proStore';
+import type { ProSubscriptionService } from './proSubscriptionService';
+import type { AttachmentStore, StoredAttachment } from './attachmentStore';
+import type { AttachmentProcessingQueue, AttachmentProcessor } from './attachmentProcessor';
+import {
+  PROMPT_ATTACHMENT_CHARACTERS,
+  PROMPT_CHARACTERS_PER_ATTACHMENT,
+  SESSION_EXCERPT_CHARACTERS,
+} from './attachmentProcessor';
+import type { AttachmentUsageLedger } from './attachmentUsage';
+import { registerAttachmentRoutes, registerUnavailableAttachmentRoutes } from './attachmentRoutes';
+import { registerProRoutes, registerUnavailableProRoutes } from './proRoutes';
+
+export interface AttachmentServices {
+  store: AttachmentStore;
+  queue: AttachmentProcessingQueue;
+  processor: AttachmentProcessor;
+  usage: AttachmentUsageLedger;
+}
 
 export interface ContextualServices {
   client: AzureOpenAI;
-  /** Free-tier daily message allowance (Azure Table Storage). Paid tiers never use it. */
+  /** Free plan daily message allowance (Azure Table Storage). Pro never uses it. */
   chatQuota?: ChatQuota;
   /** Records OneHook suggestions in Matching (AWS) with the member's token. */
   suggestionRecorder?: SuggestionRecorder;
@@ -34,55 +54,17 @@ export interface ContextualServices {
   dataClient: OneHookDataClient;
   sessionStore: PlaintextChatSessionStore;
   productContextProvider: (query: string) => Promise<string>;
+  /** Mr OneHook Pro subscriptions. Absent: only the membership decides the plan. */
+  pro?: ProSubscriptionService;
+  /** Chat attachments. Absent: attachment routes answer 503 `ATTACHMENTS_NOT_CONFIGURED`. */
+  attachments?: AttachmentServices;
 }
 
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
-}
-
-function createPrincipalRateLimiter(
-  keyForRequest: (req: Request) => string | undefined,
-  limit: number,
-  windowMs = 60_000,
-  maxEntries = 10_000,
-) {
-  const entries = new Map<string, RateLimitEntry>();
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const key = keyForRequest(req);
-    if (!key) {
-      res.status(401).json({ error: 'AUTH_REQUIRED' });
-      return;
-    }
-    const now = Date.now();
-    for (const [entryKey, entry] of entries) {
-      if (entry.resetAt <= now) entries.delete(entryKey);
-    }
-    if (entries.size >= maxEntries && !entries.has(key)) {
-      const oldestKey = entries.keys().next().value as string | undefined;
-      if (oldestKey) entries.delete(oldestKey);
-    }
-    const existing = entries.get(key);
-    if (!existing) {
-      entries.set(key, { count: 1, resetAt: now + windowMs });
-      next();
-      return;
-    }
-    existing.count += 1;
-    if (existing.count > limit) {
-      res.status(429).json({ error: 'RATE_LIMITED' });
-      return;
-    }
-    next();
-  };
-}
-
-function requestIdFor(req: Request): string {
-  const idempotencyKey = req.get('idempotency-key');
-  return idempotencyKey
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)
-    ? idempotencyKey
-    : randomUUID();
+/** Answer of a check that ends the request. */
+class Refusal extends Error {
+  constructor(readonly status: number, readonly code: string) {
+    super(code);
+  }
 }
 
 export function createContextualRouter(
@@ -106,11 +88,34 @@ export function createContextualRouter(
     router.delete('/api/member/product-connection-chat/sessions/:sessionId', (_req, res) => {
       res.status(unavailableStatus).json({ error: unavailableError });
     });
+    registerUnavailableAttachmentRoutes(router, unavailableStatus, unavailableError);
+    registerUnavailableProRoutes(router, unavailableStatus, unavailableError);
     return router;
   }
 
   const authenticateUser = createJwtAuthenticator(config, config.authAudience);
+  // One budget for every member route (chat, sessions, attachments, Pro): 20 requests per minute.
   const userRateLimit = createPrincipalRateLimiter((req) => req.auth?.subject, 20);
+  const planOf = (req: Request) => resolveEntitlement(config, services.pro, req.auth!.subject, req.auth!.membership);
+  const policyOf = (plan: MrOneHookPlan): ChatSessionPlanPolicy | undefined => config.sessionPlanPolicies[plan];
+
+  /**
+   * Makes room for one new saved session: deletes the least recently active ones until the member is
+   * below the plan's cap (Free 1: the previous session is replaced; Pro 3: the LRU one goes). Sessions the
+   * member deleted themselves are already gone, so nothing else is touched.
+   */
+  async function makeRoom(subject: string, policy: ChatSessionPlanPolicy, requestId: string): Promise<string[]> {
+    const current = await services!.sessionStore.list(subject);
+    if (current.length < policy.maxSessions) return [];
+    const evicted: string[] = [];
+    // list() is newest first: drop from the end until there is room for one more.
+    for (const old of current.slice(policy.maxSessions - 1).reverse()) {
+      await services!.sessionStore.delete(subject, old.sessionId);
+      evicted.push(old.sessionId);
+    }
+    console.info('Replaced least recent chat sessions', { requestId, count: evicted.length });
+    return evicted;
+  }
 
   router.post(
     '/api/member/product-connection-chat',
@@ -125,6 +130,7 @@ export function createContextualRouter(
           config.maxInputCharacters,
           config.maxEphemeralMessages,
           config.maxEphemeralCharacters,
+          config.attachments.maxPerMessage,
         );
       } catch {
         res.status(400).json({ error: 'INVALID_CONTEXTUAL_CHAT_REQUEST', requestId });
@@ -134,19 +140,23 @@ export function createContextualRouter(
       let quotaTaken = false;
       try {
         const subject = req.auth!.subject;
-        let sessionPolicy: ChatSessionTierPolicy | undefined;
+        const entitlement = await planOf(req);
+        const plan = entitlement.plan;
+        let sessionPolicy: ChatSessionPlanPolicy | undefined;
         if (input.persistSession) {
           if (!config.sessionStorageReady) {
             res.status(503).json({ error: 'CHAT_SESSION_STORAGE_NOT_CONFIGURED', requestId });
             return;
           }
-          sessionPolicy = req.auth!.tier
-            ? config.sessionTierPolicies[req.auth!.tier]
-            : undefined;
+          sessionPolicy = policyOf(plan);
           if (!sessionPolicy) {
             res.status(403).json({ error: 'CHAT_SESSION_NOT_INCLUDED_IN_TIER', requestId });
             return;
           }
+        }
+        if (input.attachmentIds.length > 0) {
+          if (!services.attachments || !config.attachments.ready) throw new Refusal(503, 'ATTACHMENTS_NOT_CONFIGURED');
+          if (plan !== 'PRO') throw new Refusal(403, 'PRO_REQUIRED');
         }
 
         const match = input.matchId
@@ -163,38 +173,35 @@ export function createContextualRouter(
           res.status(404).json({ error: 'CHAT_SESSION_NOT_FOUND', requestId });
           return;
         }
-        // A NEW saved session when the member already has their tier's maximum: refuse before the model
-        // call (listing the sessions so the app can offer a choice), or, when the member chose it, delete
-        // the least recently active one first. The store's index re-checks the cap when the turn is saved.
-        if (sessionPolicy && !existingSession) {
-          const current = await services.sessionStore.list(subject);
-          if (current.length >= sessionPolicy.maxSessions) {
-            if (!input.replaceLeastRecent) {
-              res.status(409).json({
-                error: 'CHAT_SESSION_LIMIT_REACHED',
-                maxSessions: sessionPolicy.maxSessions,
-                sessions: current,
-                requestId,
-              });
-              return;
-            }
-            // list() is newest first: drop from the end until there is room for one more.
-            for (const old of current.slice(sessionPolicy.maxSessions - 1).reverse()) {
-              await services.sessionStore.delete(subject, old.sessionId);
-              console.info('Replaced least recent chat session', { requestId });
+
+        // The files of this turn: the member's own, READY, and match-chat files only in that match's chat.
+        const attachments: StoredAttachment[] = [];
+        for (const attachmentId of input.attachmentIds) {
+          const found = await services.attachments!.store.get(subject, attachmentId);
+          if (!found) throw new Refusal(404, 'ATTACHMENT_NOT_FOUND');
+          const record = found.record;
+          if (record.status === 'PROCESSING') {
+            if (services.attachments!.queue.isAbandoned(record)) services.attachments!.queue.enqueue(subject, attachmentId);
+            throw new Refusal(409, 'ATTACHMENT_NOT_READY');
+          }
+          if (record.status === 'FAILED' || record.place === 'saved') throw new Refusal(400, 'ATTACHMENT_NOT_USABLE');
+          if (record.source === 'match_chat') {
+            if (record.matchId !== input.matchId || !match) throw new Refusal(400, 'ATTACHMENT_NOT_USABLE');
+            if (record.sender === 'match' && (!match.messageHistoryAllowed || !input.includeMessageHistory)) {
+              throw new Refusal(403, 'MESSAGE_CONTEXT_NOT_ALLOWED');
             }
           }
+          attachments.push(found);
         }
 
         if (input.ephemeralMessageContext && (!match || !match.messageHistoryAllowed)) {
           res.status(403).json({ error: 'MESSAGE_CONTEXT_NOT_ALLOWED', requestId });
           return;
         }
-        // Free tier (Must): 10 messages per UTC day; paid tiers unlimited. The tier is the verified
-        // token's, never the client's. The slot is taken before the model call and given back if it fails.
-        const paid = PAID_SUBSCRIPTION_TIERS.some((t) => t.wire === req.auth!.membership);
+        // Free plan: 10 messages per UTC day; Pro unlimited. The plan comes from the verified token and the
+        // Pro table, never the client. The slot is taken before the model call and given back if it fails.
         let remainingMessages: number | undefined;
-        if (!paid) {
+        if (plan === 'FREE') {
           const decision = await (services.chatQuota ?? unavailableChatQuota).consume(subject);
           if (!decision.allowed) {
             res.status(402).json({ error: 'MESSAGE_LIMIT_REACHED', remainingMessages: 0, requestId });
@@ -207,6 +214,19 @@ export function createContextualRouter(
         const excerpts = match && match.messageHistoryAllowed && input.includeMessageHistory
           ? input.ephemeralMessageContext?.excerpts ?? []
           : [];
+        let promptBudget = PROMPT_ATTACHMENT_CHARACTERS;
+        const promptAttachments: PromptAttachment[] = attachments.map(({ record }) => {
+          const full = record.extracted?.text ?? '';
+          const allowed = Math.max(0, Math.min(PROMPT_CHARACTERS_PER_ATTACHMENT, promptBudget));
+          promptBudget -= Math.min(full.length, allowed);
+          return {
+            name: record.name,
+            kind: record.kind,
+            sharedBy: record.source === 'match_chat' && record.sender === 'match' ? 'your match' : 'you',
+            content: full.slice(0, allowed),
+            truncated: Boolean(record.extracted?.truncated) || full.length > allowed,
+          };
+        });
         const { prompt, contextUsed } = buildContextualSystemPrompt(
           match,
           input,
@@ -216,6 +236,7 @@ export function createContextualRouter(
             : [],
           productContext,
           config.contextRequestMaxMessages,
+          promptAttachments,
         );
         const completion = await services.client.chat.completions.create({
           model: services.deployment,
@@ -231,18 +252,56 @@ export function createContextualRouter(
         const result: ContextualModelResponse = !input.matchId && parsedResult.needsMoreContext
           ? { reply: parsedResult.reply, mood: parsedResult.mood }
           : parsedResult;
-        const storedSession = sessionPolicy && !parsedResult.needsMoreContext
-          ? await services.sessionStore.appendExchange({
-              subject,
-              ...(input.matchId ? { matchId: input.matchId } : {}),
-              ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-              exchangeId: requestId,
-              userMessage: input.message,
-              assistantMessage: result.reply,
-              assistantMood: result.mood,
-              policy: sessionPolicy,
-            })
-          : undefined;
+        const finalAnswer = !parsedResult.needsMoreContext;
+
+        // What the saved turn keeps of its files: uploads keep an id and an excerpt; match-chat files keep
+        // only their name and kind (their content is never stored).
+        const userAttachments: StoredAttachmentRef[] = attachments.map(({ record }) => record.source === 'upload'
+          ? {
+              attachmentId: record.attachmentId, name: record.name, kind: record.kind, sizeBytes: record.sizeBytes, source: record.source,
+              ...(record.extracted?.text ? { excerpt: record.extracted.text.slice(0, SESSION_EXCERPT_CHARACTERS) } : {}),
+            }
+          : { name: record.name, kind: record.kind, source: record.source });
+        const append = () => services.sessionStore.appendExchange({
+          subject,
+          ...(input.matchId ? { matchId: input.matchId } : {}),
+          ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+          exchangeId: requestId,
+          userMessage: input.message,
+          assistantMessage: result.reply,
+          assistantMood: result.mood,
+          ...(userAttachments.length > 0 ? { userAttachments } : {}),
+          policy: sessionPolicy!,
+        });
+        // A NEW saved session at the plan's cap replaces the least recently active one(s), only once there is
+        // an answer to save (a failed model call or a clarification deletes nothing). The store's index
+        // re-checks the cap on save; a concurrent request that took the slot meanwhile is handled once more.
+        const evictedSessionIds: string[] = [];
+        let storedSession;
+        if (sessionPolicy && finalAnswer) {
+          if (!existingSession) evictedSessionIds.push(...await makeRoom(subject, sessionPolicy, requestId));
+          try {
+            storedSession = await append();
+          } catch (error) {
+            // A concurrent request filled the plan's last slot meanwhile: make room again, once.
+            if (!(error instanceof ChatSessionLimitError) || existingSession) throw error;
+            evictedSessionIds.push(...await makeRoom(subject, sessionPolicy, requestId));
+            storedSession = await append();
+          }
+        }
+        // Files are used once. Uploads move into the saved session (deleted with it) or are deleted;
+        // match-chat files are always deleted. A clarification (needsMoreContext) keeps them for the retry.
+        if (finalAnswer && attachments.length > 0) {
+          for (const stored of attachments) {
+            const keep = storedSession && stored.record.source === 'upload';
+            try {
+              if (keep) await services.attachments!.store.save(subject, stored, storedSession!.sessionId, storedSession!.expiresAt);
+              else await services.attachments!.store.delete(subject, stored.record.attachmentId);
+            } catch (error) {
+              console.error('Attachment finalize failed', { requestId, errorType: error instanceof Error ? error.name : 'UnknownError' });
+            }
+          }
+        }
         // "OneHook, find me ...": record the suggestion in Matching so matching people appear in the
         // member's discover feed. Only from product chats: in a connection chat the model also sees the
         // other person's messages, which must never be able to plant suggestions in this member's feed.
@@ -280,11 +339,17 @@ export function createContextualRouter(
                 },
               }
             : {}),
+          ...(evictedSessionIds.length > 0 ? { evictedSessionIds } : {}),
+          plan,
         });
       } catch (error: unknown) {
         if (quotaTaken) await (services.chatQuota ?? unavailableChatQuota).release(req.auth!.subject);
-        if (error instanceof QuotaUnavailableError) {
-          console.error('Chat quota store unavailable', { requestId });
+        if (error instanceof Refusal) {
+          res.status(error.status).json({ error: error.code, requestId });
+          return;
+        }
+        if (error instanceof QuotaUnavailableError || error instanceof ProStoreUnavailableError) {
+          console.error('Chat plan or quota store unavailable', { requestId, errorType: error.name });
           res.status(503).json({ error: 'CHAT_TEMPORARILY_UNAVAILABLE', requestId });
           return;
         }
@@ -342,18 +407,17 @@ export function createContextualRouter(
     authenticateUser,
     userRateLimit,
     async (req, res): Promise<void> => {
-      const policy = req.auth!.tier ? config.sessionTierPolicies[req.auth!.tier] : undefined;
       if (!config.sessionStorageReady) {
         res.status(503).json({ error: 'CHAT_SESSION_STORAGE_NOT_CONFIGURED' });
         return;
       }
-      if (!policy) {
-        res.status(403).json({ error: 'CHAT_SESSION_NOT_INCLUDED_IN_TIER' });
-        return;
-      }
       try {
-        const pathSessionId = Array.isArray(req.params.sessionId) ? '' : (req.params.sessionId ?? '');
-        const session = await services.sessionStore.get(req.auth!.subject, pathSessionId);
+        const policy = policyOf((await planOf(req)).plan);
+        if (!policy) {
+          res.status(403).json({ error: 'CHAT_SESSION_NOT_INCLUDED_IN_TIER' });
+          return;
+        }
+        const session = await services.sessionStore.get(req.auth!.subject, pathParam(req, 'sessionId'));
         if (!session) {
           res.status(404).json({ error: 'CHAT_SESSION_NOT_FOUND' });
           return;
@@ -363,7 +427,16 @@ export function createContextualRouter(
         }
         const messages = session.messages
           .slice(-(policy.maxMessages - (policy.maxMessages % 2)))
-          .map(({ role, content, createdAt, mood }) => ({ role, content, createdAt, ...(mood ? { mood } : {}) }));
+          .map(({ role, content, createdAt, mood, attachments }) => ({
+            role,
+            content,
+            createdAt,
+            ...(mood ? { mood } : {}),
+            // The excerpt is for the model only; the app gets the reference.
+            ...(attachments && attachments.length > 0
+              ? { attachments: attachments.map(({ excerpt: _excerpt, ...ref }) => ref) }
+              : {}),
+          }));
         const detail: ChatSessionDetail = {
           sessionId: session.sessionId,
           scope: session.matchId ? 'connection' : 'product',
@@ -394,8 +467,7 @@ export function createContextualRouter(
     userRateLimit,
     async (req, res): Promise<void> => {
       try {
-        const pathSessionId = Array.isArray(req.params.sessionId) ? '' : (req.params.sessionId ?? '');
-        await services.sessionStore.delete(req.auth!.subject, pathSessionId);
+        await services.sessionStore.delete(req.auth!.subject, pathParam(req, 'sessionId'));
         res.status(204).send();
       } catch (error: unknown) {
         if (error instanceof ChatSessionAccessError) {
@@ -409,6 +481,9 @@ export function createContextualRouter(
       }
     },
   );
+
+  registerAttachmentRoutes(router, { config, services, authenticateUser, userRateLimit, planOf });
+  registerProRoutes(router, { config, services, authenticateUser, userRateLimit, planOf, policyOf, freeDailyMessages: FREE_DAILY_MESSAGES });
 
   return router;
 }

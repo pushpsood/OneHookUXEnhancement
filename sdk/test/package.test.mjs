@@ -18,7 +18,8 @@ const pkg = require(`${pkgDir}package.json`);
 function capturing(captured, respond) {
   return {
     handle: async (request) => {
-      captured.push({ method: request.method, path: request.path, authorization: request.headers.authorization ?? request.headers.Authorization, body: request.body });
+      const headers = Object.fromEntries(Object.entries(request.headers).map(([k, v]) => [k.toLowerCase(), v]));
+      captured.push({ method: request.method, path: request.path, authorization: headers.authorization, headers, body: request.body });
       const text = JSON.stringify(respond(request.path));
       return {
         response: {
@@ -69,7 +70,16 @@ test('the manifest lists every operation with its auth', () => {
   assert.deepEqual(
     API_OPERATIONS.map((o) => `${o.auth} ${o.method} ${o.path} ${o.operationId}`),
     [
+      'cognito GET /api/member/mr-onehook-pro GetMrOneHookPro',
+      'cognito DELETE /api/member/mr-onehook-pro/continuation CancelMrOneHookProContinuation',
+      'cognito PUT /api/member/mr-onehook-pro/continuation ContinueMrOneHookProAfterMembership',
+      'cognito DELETE /api/member/mr-onehook-pro/notices/{noticeId} DismissMrOneHookProNotice',
+      'cognito POST /api/member/mr-onehook-pro/subscription PurchaseMrOneHookPro',
+      'cognito PUT /api/member/mr-onehook-pro/subscription/auto-renew UpdateMrOneHookProAutoRenew',
       'cognito POST /api/member/product-connection-chat ProductConnectionChat',
+      'cognito POST /api/member/product-connection-chat/attachments UploadChatAttachment',
+      'cognito GET /api/member/product-connection-chat/attachments/{attachmentId} GetChatAttachment',
+      'cognito GET /api/member/product-connection-chat/attachments/{attachmentId}/content GetChatAttachmentContent',
       'cognito GET /api/member/product-connection-chat/sessions ListChatSessions',
       'cognito DELETE /api/member/product-connection-chat/sessions/{sessionId} DeleteChatSession',
       'cognito GET /api/member/product-connection-chat/sessions/{sessionId} GetChatSession',
@@ -78,4 +88,27 @@ test('the manifest lists every operation with its auth', () => {
     ]
   );
   assert.ok(API_OPERATIONS.every((o) => o.service === 'mr-onehook'));
+});
+
+test('an attachment upload sends the raw bytes with its headers; a Pro purchase sends the idempotency key', async () => {
+  const captured = [];
+  const client = new MrOneHookService({
+    endpoint: 'https://chatbot.gamma.onehook.club',
+    token: async () => ({ token: 'member-id-token' }),
+    requestHandler: capturing(captured, (path) =>
+      path.endsWith('/attachments')
+        ? { attachment: { attachmentId: 'a-1', name: 'menu.png', kind: 'image', mediaType: 'image/png', sizeBytes: 3, status: 'PROCESSING', source: 'upload', createdAt: 'x', expiresAt: 'y' } }
+        : { plan: 'PRO', source: 'SUBSCRIPTION', canPurchase: false, offers: [], limits: { maxSessions: 3, attachmentsAllowed: true, maxAttachmentBytes: 5242880, maxAttachmentsPerMessage: 3 }, notices: [] }
+    ),
+  });
+  const uploaded = await client.uploadChatAttachment({
+    contentType: 'image/png', fileName: encodeURIComponent('menu.png'), body: new Uint8Array([1, 2, 3]),
+  });
+  assert.equal(uploaded.attachment.status, 'PROCESSING');
+  await client.purchaseMrOneHookPro({ idempotencyKey: '11111111-1111-4111-8111-111111111111', billingPeriod: 'MONTHLY', paymentToken: 'fake-ok' });
+  assert.equal(captured[0].path, '/api/member/product-connection-chat/attachments');
+  assert.equal(captured[0].headers['content-type'], 'image/png');
+  assert.equal(captured[0].headers['x-attachment-name'], 'menu.png');
+  assert.equal(captured[1].headers['idempotency-key'], '11111111-1111-4111-8111-111111111111');
+  assert.deepEqual(JSON.parse(captured[1].body), { billingPeriod: 'MONTHLY', paymentToken: 'fake-ok' });
 });

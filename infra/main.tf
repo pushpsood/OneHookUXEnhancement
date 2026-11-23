@@ -150,6 +150,43 @@ resource "azurerm_storage_management_policy" "session_retention" {
       }
     }
   }
+
+  # Unsent uploads and files from a match chat live one day (the app also deletes them after use).
+  rule {
+    name    = "delete-unsent-chat-attachments"
+    enabled = true
+
+    filters {
+      prefix_match = [
+        "${azurerm_storage_container.session_container.name}/attachments/pending/",
+        "${azurerm_storage_container.session_container.name}/attachments/ephemeral/",
+      ]
+      blob_types = ["blockBlob"]
+    }
+
+    actions {
+      base_blob {
+        delete_after_days_since_modification_greater_than = 1
+      }
+    }
+  }
+
+  # Files kept with a saved session: deleted with it, and never kept past the retention cap.
+  rule {
+    name    = "delete-expired-chat-attachments"
+    enabled = true
+
+    filters {
+      prefix_match = ["${azurerm_storage_container.session_container.name}/attachments/saved/"]
+      blob_types   = ["blockBlob"]
+    }
+
+    actions {
+      base_blob {
+        delete_after_days_since_modification_greater_than = var.chat_session_max_retention_days
+      }
+    }
+  }
 }
 
 locals {
@@ -191,6 +228,41 @@ resource "azurerm_cognitive_deployment" "gpt" {
     name     = "Standard"
     capacity = 10
   }
+}
+
+# Speech-to-text for audio and video attachments (optional; see var.openai_transcription_deployment).
+resource "azurerm_cognitive_deployment" "transcription" {
+  count                = var.openai_transcription_deployment == null ? 0 : 1
+  name                 = var.openai_transcription_deployment.name
+  cognitive_account_id = azurerm_cognitive_account.openai.id
+
+  model {
+    format  = "OpenAI"
+    name    = var.openai_transcription_deployment.model_name
+    version = var.openai_transcription_deployment.model_version
+  }
+
+  sku {
+    name     = var.openai_transcription_deployment.sku_name
+    capacity = var.openai_transcription_deployment.capacity
+  }
+}
+
+# Azure AI Document Intelligence (PDF, Office and HEIC attachments). Entra auth only: local keys are
+# disabled, which needs a custom subdomain.
+resource "azurerm_cognitive_account" "document_intelligence" {
+  count                 = var.document_intelligence_enabled ? 1 : 0
+  name                  = "${var.document_intelligence_name}-${random_string.suffix.result}"
+  location              = azurerm_resource_group.rg.location
+  resource_group_name   = azurerm_resource_group.rg.name
+  kind                  = "FormRecognizer"
+  sku_name              = "S0"
+  custom_subdomain_name = "${var.document_intelligence_name}-${random_string.suffix.result}"
+  local_auth_enabled    = false
+}
+
+locals {
+  document_intelligence_endpoint = var.document_intelligence_enabled ? azurerm_cognitive_account.document_intelligence[0].endpoint : ""
 }
 
 # App Service Plan (Linux)
@@ -235,6 +307,8 @@ resource "azurerm_linux_web_app" "app" {
     "AZURE_STORAGE_CONTAINER"                    = azurerm_storage_container.context_container.name
     "AZURE_SESSION_CONTAINER"                    = azurerm_storage_container.session_container.name
     "AZURE_CHAT_QUOTA_TABLE"                     = azapi_resource.chat_quota_table.name
+    "AZURE_PRO_TABLE"                            = azapi_resource.pro_table.name
+    "ONEHOOK_STAGE"                              = var.stage
     "CONTEXTUAL_AI_ENABLED"                      = tostring(var.contextual_ai_enabled)
     "AUTH_ISSUER"                                = var.auth_issuer
     "AUTH_AUDIENCE"                              = var.auth_audience
@@ -252,14 +326,25 @@ resource "azurerm_linux_web_app" "app" {
     "CHAT_SESSION_STORAGE_ENABLED"               = tostring(var.chat_session_storage_enabled)
     "AUTH_TIER_CLAIM"                            = var.auth_tier_claim
     "CHAT_SESSION_MAX_RETENTION_DAYS"            = tostring(var.chat_session_max_retention_days)
-    "CHAT_SESSION_TIER_POLICIES" = jsonencode({
-      for tier, policy in var.chat_session_tier_policies : lower(tier) => {
+    "CHAT_SESSION_PLAN_POLICIES" = jsonencode({
+      for plan, policy in var.chat_session_plan_policies : lower(plan) => {
         enabled       = policy.enabled
         maxSessions   = policy.max_sessions
         maxMessages   = policy.max_messages
         retentionDays = policy.retention_days
       }
     })
+    "MR_ONEHOOK_PRO_ENABLED"           = tostring(var.mr_onehook_pro_enabled)
+    "MR_ONEHOOK_PRO_INCLUDED_TIERS"    = join(",", var.mr_onehook_pro_included_tiers)
+    "MR_ONEHOOK_PRO_PRICES"            = jsonencode(var.mr_onehook_pro_prices)
+    "MR_ONEHOOK_PRO_PAYMENT_PROVIDER"  = var.mr_onehook_pro_payment_provider
+    "MR_ONEHOOK_ENTITLEMENT_QUEUE_URL" = var.mr_onehook_entitlement_queue_url
+    "CHAT_ATTACHMENTS_ENABLED"         = tostring(var.chat_attachments_enabled)
+    "ATTACHMENT_MONTHLY_BUDGET_MINOR"  = jsonencode(var.attachment_monthly_budget_minor)
+    "AZURE_OPENAI_TRANSCRIPTION_DEPLOYMENT" = (
+      var.openai_transcription_deployment == null ? "" : azurerm_cognitive_deployment.transcription[0].name
+    )
+    "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT" = local.document_intelligence_endpoint
   }
 }
 
@@ -305,6 +390,28 @@ import {
 resource "azurerm_role_assignment" "app_chat_quota_table" {
   scope                = "${azurerm_storage_account.storage.id}/tableServices/default/tables/${azapi_resource.chat_quota_table.name}"
   role_definition_name = "Storage Table Data Contributor"
+  principal_id         = azurerm_linux_web_app.app.identity[0].principal_id
+}
+
+# Mr OneHook Pro: subscriptions, charge/refund ledger, notices and the attachment allowance. One row
+# set per member (hashed id). Created through ARM like chatquota (shared keys are disabled).
+resource "azapi_resource" "pro_table" {
+  type      = "Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01"
+  name      = "mronehookpro"
+  parent_id = "${azurerm_storage_account.storage.id}/tableServices/default"
+}
+
+resource "azurerm_role_assignment" "app_pro_table" {
+  scope                = "${azurerm_storage_account.storage.id}/tableServices/default/tables/${azapi_resource.pro_table.name}"
+  role_definition_name = "Storage Table Data Contributor"
+  principal_id         = azurerm_linux_web_app.app.identity[0].principal_id
+}
+
+# Document Intelligence: the app reads documents with its managed identity.
+resource "azurerm_role_assignment" "app_document_intelligence_user" {
+  count                = var.document_intelligence_enabled ? 1 : 0
+  scope                = azurerm_cognitive_account.document_intelligence[0].id
+  role_definition_name = "Cognitive Services User"
   principal_id         = azurerm_linux_web_app.app.identity[0].principal_id
 }
 

@@ -16,7 +16,16 @@ export interface ApiOperation {
 
 /** Every HTTP operation of onehook-mr-onehook-client, sorted by service, path, method. */
 export const API_OPERATIONS: readonly ApiOperation[] = [
+  { operationId: "GetMrOneHookPro", method: "GET", path: "/api/member/mr-onehook-pro", service: "mr-onehook", auth: "cognito" },
+  { operationId: "CancelMrOneHookProContinuation", method: "DELETE", path: "/api/member/mr-onehook-pro/continuation", service: "mr-onehook", auth: "cognito" },
+  { operationId: "ContinueMrOneHookProAfterMembership", method: "PUT", path: "/api/member/mr-onehook-pro/continuation", service: "mr-onehook", auth: "cognito" },
+  { operationId: "DismissMrOneHookProNotice", method: "DELETE", path: "/api/member/mr-onehook-pro/notices/{noticeId}", service: "mr-onehook", auth: "cognito" },
+  { operationId: "PurchaseMrOneHookPro", method: "POST", path: "/api/member/mr-onehook-pro/subscription", service: "mr-onehook", auth: "cognito" },
+  { operationId: "UpdateMrOneHookProAutoRenew", method: "PUT", path: "/api/member/mr-onehook-pro/subscription/auto-renew", service: "mr-onehook", auth: "cognito" },
   { operationId: "ProductConnectionChat", method: "POST", path: "/api/member/product-connection-chat", service: "mr-onehook", auth: "cognito" },
+  { operationId: "UploadChatAttachment", method: "POST", path: "/api/member/product-connection-chat/attachments", service: "mr-onehook", auth: "cognito" },
+  { operationId: "GetChatAttachment", method: "GET", path: "/api/member/product-connection-chat/attachments/{attachmentId}", service: "mr-onehook", auth: "cognito" },
+  { operationId: "GetChatAttachmentContent", method: "GET", path: "/api/member/product-connection-chat/attachments/{attachmentId}/content", service: "mr-onehook", auth: "cognito" },
   { operationId: "ListChatSessions", method: "GET", path: "/api/member/product-connection-chat/sessions", service: "mr-onehook", auth: "cognito" },
   { operationId: "DeleteChatSession", method: "DELETE", path: "/api/member/product-connection-chat/sessions/{sessionId}", service: "mr-onehook", auth: "cognito" },
   { operationId: "GetChatSession", method: "GET", path: "/api/member/product-connection-chat/sessions/{sessionId}", service: "mr-onehook", auth: "cognito" },

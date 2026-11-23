@@ -32,7 +32,7 @@ test('an unusable matchSuggestion is dropped without failing the reply', () => {
 
 test('prompt instructs the model to emit matchSuggestion only on explicit requests, without sensitive traits', () => {
   const { prompt } = buildContextualSystemPrompt(undefined, {
-    message: 'find me someone', includeProfile: true, includeMessageHistory: true, persistSession: false,
+    message: 'find me someone', includeProfile: true, includeMessageHistory: true, persistSession: false, attachmentIds: [],
   }, []);
   assert.match(prompt, /"matchSuggestion": include ONLY when the member explicitly asks/);
   assert.match(prompt, /never physical traits, race, religion/);
@@ -186,6 +186,7 @@ test('route: the suggestion is gated on the verified token subject, and MATCHING
     CORS_ALLOWED_ORIGINS: 'https://x', ONEHOOK_DATA_API_URL: 'https://data', AZURE_STORAGE_ACCOUNT: 'acct',
     AZURE_SESSION_CONTAINER: 'c', ONEHOOK_DATA_API_AWS_REGION: 'ap-south-1',
   } as NodeJS.ProcessEnv);
+  const chatQuota = { consume: async () => ({ allowed: true as const, remaining: 9 }), release: async () => {} };
   const model = { chat: { completions: { create: async () => ({ choices: [{ message: { content: reply({
     matchSuggestion: { prompt: 'Someone outdoorsy', reasoning: 'You asked for someone outdoorsy' },
   }) } }] }) } } };
@@ -199,7 +200,7 @@ test('route: the suggestion is gated on the verified token subject, and MATCHING
   app.use(express.json());
   app.use(createContextualRouter(config, {
     client: model as never, deployment: 'd', dataClient: {} as never, sessionStore: {} as never,
-    productContextProvider: async () => '',
+    productContextProvider: async () => '', chatQuota,
     suggestionRecorder: new MatchingSuggestionClient('https://matching', { sign: async (r) => r.headers }, 1000, statusReader, fetchImpl),
   }));
   const server = app.listen(0);

@@ -87,6 +87,7 @@ async function withServer(quotaTable: QuotaTable, run: (call: (tier: string | un
     CONTEXTUAL_AI_ENABLED: 'true', AUTH_ISSUER: 'https://issuer.test', AUTH_AUDIENCE: 'aud', AUTH_JWKS_URI: jwksUrl,
     CORS_ALLOWED_ORIGINS: 'https://x', ONEHOOK_DATA_API_URL: 'https://data', AZURE_STORAGE_ACCOUNT: 'acct',
     AZURE_SESSION_CONTAINER: 'c', ONEHOOK_DATA_API_AWS_REGION: 'ap-south-1', AZURE_CHAT_QUOTA_TABLE: 'chatquota',
+    MR_ONEHOOK_PRO_INCLUDED_TIERS: 'infinity',
   } as NodeJS.ProcessEnv);
   let calls = 0;
   const client = { chat: { completions: { create: async () => { calls++; return { choices: [{ message: { content: JSON.stringify({ reply: 'hi', mood: 'Happy' }) } }] }; } } } };
@@ -111,7 +112,7 @@ async function withServer(quotaTable: QuotaTable, run: (call: (tier: string | un
   try { await run(call, () => calls); } finally { server.close(); jwks.close(); }
 }
 
-test('route: every member may chat (no group/permission gate); Must gets 10/day then 402; Super is unlimited', async () => {
+test('route: every member may chat (no group/permission gate); the Free plan (Must, Super) gets 10/day then 402; Pro is unlimited', async () => {
   await withServer(fakeTable().table, async (call, modelCalls) => {
     const first = await call('MUST');
     assert.equal(first.status, 200, 'no context.chat permission needed');
@@ -123,13 +124,15 @@ test('route: every member may chat (no group/permission gate); Must gets 10/day 
     assert.equal(modelCalls(), FREE_DAILY_MESSAGES, 'the model is not called once the limit is reached');
 
     assert.equal((await call(undefined)).body.remainingMessages, FREE_DAILY_MESSAGES - 1, 'no tier claim = Must');
-    const paid = await call('SUPER');
-    assert.equal(paid.status, 200);
-    assert.equal(paid.body.remainingMessages, undefined, 'paid tiers have no counter');
+    assert.equal((await call('SUPER')).body.remainingMessages, FREE_DAILY_MESSAGES - 1, 'Super is on the Free plan');
+    const pro = await call('INFINITY');
+    assert.equal(pro.status, 200);
+    assert.equal(pro.body.remainingMessages, undefined, 'Pro (included in the membership) has no counter');
+    assert.equal(pro.body.plan, 'PRO');
   });
 });
 
-test('route: free member gets 503 (not unlimited) when the counter store fails; paid unaffected', async () => {
+test('route: a Free member gets 503 (not unlimited) when the counter store fails; Pro unaffected', async () => {
   await withServer(fakeTable({ failReads: true }).table, async (call) => {
     const free = await call('MUST');
     assert.equal(free.status, 503);

@@ -39,3 +39,9 @@ onehook_matching_api_url = ""
 # UxErasureQueueUrl (https://sqs.<region>.amazonaws.com/<prod account>/OneHook-Matching-prod-UxErasure), together
 # with onehook_data_api_aws_role_arn above.
 ux_erasure_queue_url = ""
+
+# Mr OneHook Pro stays off in prod until the member routes are live and a real payment rail exists.
+# The fake provider is refused for prod (variable validation and backend config).
+mr_onehook_pro_enabled          = false
+mr_onehook_pro_payment_provider = "none"
+chat_attachments_enabled        = false

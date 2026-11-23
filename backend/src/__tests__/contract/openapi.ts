@@ -33,7 +33,10 @@ export interface OpenApiOperation {
   path: string;
   /** `[]` for an operation without auth; absent means the document default (Bearer). */
   security?: unknown[];
-  responses: Record<string, { content?: Record<string, { schema: OpenApiSchema }> }>;
+  responses: Record<string, {
+    content?: Record<string, { schema: OpenApiSchema }>;
+    headers?: Record<string, { required?: boolean }>;
+  }>;
 }
 
 export interface OpenApiDocument {
@@ -146,10 +149,18 @@ export function checkResponse(
   status: number,
   contentType: string | null,
   rawBody: string,
+  headers?: Headers,
 ): string[] {
   const declared = op.responses[String(status)];
   if (!declared) return [`status ${status} is not declared (declared: ${Object.keys(op.responses).join(', ')}); body ${rawBody}`];
   const media = declared.content?.['application/json'];
+  // A blob payload (`@httpPayload Blob`): any bytes, with every required response header present.
+  if (!media && declared.content && Object.keys(declared.content).length > 0) {
+    const missing = Object.entries(declared.headers ?? {})
+      .filter(([name, h]) => h.required && !headers?.get(name))
+      .map(([name]) => `status ${status}: required header ${name} missing`);
+    return [...missing, ...(rawBody.length === 0 ? [`status ${status}: expected a body`] : [])];
+  }
   if (!media) return rawBody.length === 0 ? [] : [`status ${status} declares no body, got ${rawBody}`];
   if (!contentType?.includes('application/json')) return [`status ${status}: expected application/json, got ${contentType}`];
   let body: unknown;

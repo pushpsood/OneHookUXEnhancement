@@ -26,3 +26,18 @@ aws_audience_import_identifier_uri = "api://8a078d5e-ad9d-4156-b89d-419871233992
 # above; equals the Matching stack output UxErasureQueueUrl, so re-check it there after a redeploy.
 ux_erasure_queue_url = "https://sqs.ap-south-1.amazonaws.com/627367419734/OneHook-Matching-gamma-UxErasure"
 
+
+# Mr OneHook Pro: purchases with the fake payment provider (moves no money; refused in prod) until a real
+# rail is plugged in. Members whose tier includes Pro (Infinity) get it without buying.
+mr_onehook_pro_enabled          = true
+mr_onehook_pro_payment_provider = "fake"
+# The membership's Pro handover queue (OneHookBackend Matching stack output MrOneHookEntitlementsQueueUrl).
+# Deploy that stack first: until the queue exists the worker only logs failed receives with backoff. While
+# State's MR_ONEHOOK_PRO_HANDOVER_ENABLED is on for gamma, upgrades into Infinity wait for this worker.
+mr_onehook_entitlement_queue_url = "https://sqs.ap-south-1.amazonaws.com/627367419734/OneHook-Matching-gamma-MrOneHookEntitlements"
+
+# Pro attachments: images (vision on the gpt-4o deployment), documents (Document Intelligence) and text.
+# Audio and video need a speech-to-text deployment: set openai_transcription_deployment once the model
+# and version are confirmed in the Foundry catalog for southindia (gpt-transcribe lists India South).
+chat_attachments_enabled      = true
+document_intelligence_enabled = true

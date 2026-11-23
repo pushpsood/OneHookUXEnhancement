@@ -45,9 +45,9 @@ flowchart LR
       MatchGate{"matchId supplied?"}
       MatchAuth["Authorize active match<br/>and AI-visible profile policy"]
       ValidateExcerpts["Validate bounded ephemeral excerpts<br/>Never persist or log them"]
-      FreeQuota["Must tier only: take 1 of<br/>10 daily messages"]
+      FreeQuota["Free plan only: take 1 of<br/>10 daily messages"]
       SessionGate{"sessionOptions.persist?"}
-      TierPolicy["Resolve verified Cognito tier<br/>and enforce session policy"]
+      TierPolicy["Resolve the Mr OneHook plan<br/>(verified tier, then Pro table)<br/>and enforce its session policy"]
       SessionStore["Load or save user-scoped<br/>application-readable AI session"]
       Assemble["Assemble minimized untrusted prompt<br/>product + profile + ephemeral excerpts + AI session"]
       ContextDecision{"More local context needed?"}
@@ -111,7 +111,7 @@ flowchart LR
   style Azure fill:#eef6ff,stroke:#0078d4,stroke-width:2px
 ```
 
-The anonymous route answers product questions only. The member route always receives product context; `matchId` adds freshly authorized profile/match policy, and the app may attach a bounded `ephemeralMessageContext` selected after local decryption. UX Enhancement uses those excerpts only in memory for the current model request and never mirrors match messages in Azure. Separately, members whose tier has a session policy (Super and Infinity by default) may opt into application-readable Mr OneHook AI sessions stored in a private Azure container; Azure platform encryption at rest still applies.
+The anonymous route answers product questions only. The member route always receives product context; `matchId` adds freshly authorized profile/match policy, and the app may attach a bounded `ephemeralMessageContext` selected after local decryption. UX Enhancement uses those excerpts only in memory for the current model request and never mirrors match messages in Azure. Separately, every signed-in member may opt into application-readable Mr OneHook AI sessions stored in a private Azure container, limited per plan (Free 1, Mr OneHook Pro 3); Azure platform encryption at rest still applies. [Mr OneHook Pro](docs/mr-onehook-pro.md) (a subscription of its own, included with Infinity) adds unlimited messages, three sessions and attachments.
 
 ### How to read the arrows
 
@@ -215,9 +215,9 @@ A product-only member request omits `matchId` and can never request match-messag
 All session paths first verify the member's Cognito ID token and the per-member rate limit. There is no group, scope or permission gate: every signed-in member may chat.
 
 1. **List sessions:** enumerate only `sessions/<hash(user)>/`, reject cross-user bindings, lazily remove expired records, and return non-content metadata with `scope: product | connection` instead of raw match IDs.
-2. **Read a session:** require a currently eligible Cognito tier (otherwise `403 CHAT_SESSION_NOT_INCLUDED_IN_TIER`), load only the user-scoped application-readable session, verify user and scope bindings, freshly reauthorize the match only for a connection-scoped session, apply the current tier's message cap, then return bounded AI turns.
+2. **Read a session:** resolve the member's plan (a plan without a session policy gets `403 CHAT_SESSION_NOT_INCLUDED_IN_TIER`), load only the user-scoped application-readable session, verify user and scope bindings, freshly reauthorize the match only for a connection-scoped session, apply the plan's message cap, then return bounded AI turns.
 3. **Delete a session:** validate the user-scoped session ID, delete its private Blob record, remove it from the hashed session index, then return `204` (also for a UUID that does not exist). Deletion remains available after a tier downgrade.
-4. **Account deletion:** on the member's `UserDeleted` event, the erasure worker deletes every blob under `sessions/<hash(user)>/`, the `session-quotas/<hash(user)>.json` session index and the member's `chatquota` rows (see [Account deletion](#account-deletion-userdeleted)).
+4. **Account deletion:** on the member's `UserDeleted` event, the erasure worker deletes every blob under `sessions/<hash(user)>/` and `attachments/*/<hash(user)>/`, the `session-quotas/<hash(user)>.json` session index, the member's `chatquota` rows and their Mr OneHook Pro rows (see [Account deletion](#account-deletion-userdeleted)).
 
 Match-to-match messages never enter this lifecycle. They stay in the app's end-to-end encrypted local store and are shared only as bounded, temporary excerpts for a specific request.
 
@@ -235,8 +235,11 @@ All of it is in `infra/main.tf`, one copy per stage (region `southindia` by defa
 | Storage account (`<storage_account_name><6 random chars>`, Standard LRS) | TLS 1.2 minimum, public nested items disabled, shared-key authentication disabled |
 | Private `codecontext` container | `CRUX.md`, the static product context |
 | Private `aisessions` container | Application-readable Mr OneHook AI turns (`sessions/`) and hashed per-member session index (`session-quotas/`); Azure platform encryption still applies |
-| Table `chatquota` (created through ARM with `azapi`) | Free-tier daily message counters |
-| Storage lifecycle policy | Deletes `sessions/` and `session-quotas/` blobs not modified for `chat_session_max_retention_days` (90) days |
+| Table `chatquota` (created through ARM with `azapi`) | Free plan daily message counters |
+| Table `mronehookpro` (ARM, `azapi`) | Mr OneHook Pro subscriptions, charge/refund ledger, notices and the attachment allowance |
+| Document Intelligence account (`FormRecognizer`, `S0`, local auth disabled; when `document_intelligence_enabled`) | Reads PDF, Office and HEIC attachments |
+| Speech-to-text deployment (when `openai_transcription_deployment` is set) | Transcribes audio and video attachments |
+| Storage lifecycle policy | Deletes `sessions/`, `session-quotas/` and `attachments/saved/` blobs not modified for `chat_session_max_retention_days` (90) days, and `attachments/pending/` and `attachments/ephemeral/` after 1 day |
 | Role assignments | App identity: Cognitive Services OpenAI User (OpenAI account), Storage Blob Data Reader (`codecontext`), Storage Blob Data Contributor (`aisessions`), Storage Table Data Contributor (`chatquota`). Deployer principal: Storage Blob Data Contributor on the account |
 | Entra app registration `aws_audience` (when `aws_federation_enabled`) | The audience of the managed-identity token that AWS trusts |
 | Custom hostname binding, App Service managed certificate, SNI binding (when `custom_domain_enabled`) | `chatbot.gamma.onehook.club` / `chatbot.onehook.club` |
@@ -253,26 +256,27 @@ Terraform outputs: `app_service_default_hostname`, `app_service_name`, `storage_
   `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID`.
 - **Cost limits in code and infrastructure:** the model deployment's capacity is 10; public chat allows
   10 requests per minute per `X-Forwarded-For` value; member routes allow 20 requests per minute per member
-  (in memory, per instance); free members get 10 messages per UTC day; JSON bodies are capped at 32 KB;
+  (in memory, per instance); Free plan members get 10 messages per UTC day; Pro file processing has a monthly
+  allowance (default Rs 400 of Azure cost) and a burst limit; JSON bodies are capped at 32 KB, uploads at 5 MiB;
   `CRUX.md` is cached for 10 minutes; the App Service plan is `B1`. There is no Application Insights or
   budget alert in Terraform.
 
 ---
 
-## Who can chat: free tier quota
+## Who can chat: Free plan quota
 
 Every signed-in member can chat with Mr OneHook; there is no group, scope or `context.chat` gate, and no
-route answers `403` for chat access (`403` is only used for session-tier and excerpt-policy refusals).
+route answers `403` for chat access (`403` is only used for session-plan, excerpt-policy and Pro-only refusals).
 
-- **Must** (free, including a missing or unknown tier claim): **10 messages per UTC day**
+- **Free plan** (Must and Super, including a missing or unknown tier claim): **10 messages per UTC day**
   (`FREE_DAILY_MESSAGES` in `backend/src/chatQuota.ts`). Beyond that the route returns
   `402 {"error": "MESSAGE_LIMIT_REACHED", "remainingMessages": 0}` and the model is not called. Successful
-  responses for free members carry `remainingMessages` so the apps can show "3 left today".
-- **Super and Infinity** (`PAID_SUBSCRIPTION_TIERS` from `onehook-api-client/membership`): unlimited,
-  still subject to the 20 requests/minute per-member limit.
+  responses for Free members carry `remainingMessages` so the apps can show "3 left today".
+- **Mr OneHook Pro** (a Pro subscription, or a tier in `MR_ONEHOOK_PRO_INCLUDED_TIERS`, Infinity by default):
+  unlimited, still subject to the 20 requests/minute per-member limit. See [Mr OneHook Pro](docs/mr-onehook-pro.md).
 - The tier is the verified token's `AUTH_TIER_CLAIM` (default `custom:subscriptionTier`), never the
-  client's; an upgrade applies at the next token refresh. Tier names are parsed by `onehook-api-client`
-  (pinned `1.0.33`), which owns them.
+  client's; an upgrade applies at the next token refresh. Tier names are parsed by `onehook-api-client`,
+  which owns them. Chat responses carry `plan` (`FREE` or `PRO`).
 
 **Storage:** Azure Table Storage table `chatquota` in the existing storage account (Terraform, created through ARM with `azapi` because the account has shared keys disabled), one row
 per member (`PartitionKey` = sha256 of the member id, `RowKey` = `daily`) holding `{ day, count }`, overwritten
@@ -282,7 +286,7 @@ writes (insert-if-absent for the first), retried on conflict, so concurrent mess
 limit. The slot is taken after request validation, match authorization and session checks, just before
 the model call, and released if anything after it fails. A `needsMoreContext` answer also uses a message. The app reaches the table with
 its managed identity and a **Storage Table Data Contributor** role scoped to that one table. If the store
-is unavailable, free members get `503 CHAT_TEMPORARILY_UNAVAILABLE` (never unlimited); paid members are
+is unavailable, Free members get `503 CHAT_TEMPORARILY_UNAVAILABLE` (never unlimited); Pro members are
 unaffected. The rows hold no message content.
 
 ## Mr OneHook "find me ..." suggestions
@@ -342,11 +346,13 @@ A background worker in this App Service (`backend/src/uxErasureWorker.ts`) long-
 waits, AWS SDK v3 `@aws-sdk/client-sqs`) with the same federated role credentials as the SigV4 routes. For
 each message it:
 
-1. deletes every `aisessions` blob of the member: all of `sessions/<sha256(userId)>/` and
-   `session-quotas/<sha256(userId)>.json` (base64url hashes, the same `stableReference` the session store
-   uses), re-listing until the prefix is empty;
+1. deletes every `aisessions` blob of the member: all of `sessions/<sha256(userId)>/`,
+   `session-quotas/<sha256(userId)>.json` and `attachments/{pending,ephemeral,saved}/<sha256(userId)>/`
+   (base64url hashes, the same `stableReference` the session store uses), re-listing until each prefix is empty;
 2. deletes the member's `chatquota` partition (`PartitionKey` = hex sha256 of the user id);
-3. deletes the message, only after both succeeded.
+3. deletes the member's Mr OneHook Pro rows (subscription, kept plan, notices, allowance) so nothing can
+   renew; charge and refund ledger rows stay for accounting (amounts and opaque ids, no member id);
+4. deletes the message, only after all of them succeeded.
 
 | Case | What happens |
 |---|---|
@@ -403,6 +409,8 @@ which rewrites `Host` and would break the signature:
 | `GET /api/ai-context/matches/{matchId}` (State, `GetAiContextMatch`) | `ONEHOOK_DATA_API_URL` | `X-OneHook-User-Id` | Connection chat and connection-session reads |
 | `GET /state/internal/users/{userId}/matching` (State, `GetInternalMatchingStatus`) | `ONEHOOK_DATA_API_URL` | none | Matching-mode check before a suggestion |
 | `POST /matching/internal/suggestions` (Matching, `RecordSuggestionInternal`) | `ONEHOOK_MATCHING_API_URL` | `X-OneHook-Member-Token` (member's ID token) | Recording a "find me ..." suggestion |
+| `GET /state/internal/users/{userId}/membership` (State, `GetInternalMembership`) | `ONEHOOK_DATA_API_URL` | none | Mr OneHook Pro: renewals, refunds, kept Pro, purchases right after a handover |
+| `POST /state/internal/users/{userId}/mr-onehook-pro-handovers/{activationId}/confirmation` (State, `ConfirmMrOneHookProHandover`) | `ONEHOOK_DATA_API_URL` | none | Confirming the membership's Pro handover |
 
 Calls time out after `ONEHOOK_DATA_API_TIMEOUT_MS` (3000 ms). The contract test
 `backend/src/__tests__/apiContract.test.ts` checks that every outbound call is an `auth: iam` operation in
@@ -416,6 +424,8 @@ The role may do exactly this:
 | `execute-api:Invoke` | State `GET /state/internal/users/*/matching` | Matching-mode check before a suggestion |
 | `execute-api:Invoke` | Matching `POST /matching/internal/suggestions` | Recording a "find me ..." suggestion |
 | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`, `sqs:GetQueueAttributes` | `OneHook-Matching-<stage>-UxErasure` | Account deletion |
+| `execute-api:Invoke` | State `GET /state/internal/users/*/membership`, `POST /state/internal/users/*/mr-onehook-pro-handovers/*/confirmation` | Mr OneHook Pro (see [Mr OneHook Pro](docs/mr-onehook-pro.md)) |
+| `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`, `sqs:GetQueueAttributes` | `OneHook-Matching-<stage>-MrOneHookEntitlements` | The membership's Pro handover |
 
 In Azure, the App Service identity has Blob Data Contributor on the `aisessions` container and Table Data
 Contributor on the `chatquota` table, which is what erasure needs; no new Azure role is required.
@@ -501,7 +511,24 @@ when the variable is absent.
 | `EPHEMERAL_CONTEXT_MAX_CHARACTERS` | Maximum total excerpt characters (500-50000) | `12000` | `12000` |
 | `CONTEXT_REQUEST_MAX_MESSAGES` | Maximum messages Mr OneHook may ask the app to find (1-20) | `8` | `8` |
 | `CHAT_SESSION_STORAGE_ENABLED` | Enables saved AI sessions | `false` | `chat_session_storage_enabled`: variable default `true`, prod.tfvars `false` |
-| `CHAT_SESSION_TIER_POLICIES` | JSON map of tier to `{enabled, maxSessions, maxMessages, retentionDays}` | `{}` | from `chat_session_tier_policies` (Super and Infinity) |
+| `CHAT_SESSION_PLAN_POLICIES` | JSON map of plan (`free`, `pro`) to `{enabled, maxSessions, maxMessages, retentionDays}`. The old `CHAT_SESSION_TIER_POLICIES` is ignored (with a warning) | `{}` | from `chat_session_plan_policies` (free 1 session, pro 3) |
+| `ONEHOOK_STAGE` | Stage name; the fake payment provider is refused unless it is set and not `prod` | empty | `stage` |
+| `MR_ONEHOOK_PRO_ENABLED` | Turns on the Pro routes (`/api/member/mr-onehook-pro`) | `false` | `mr_onehook_pro_enabled` (gamma `true`) |
+| `MR_ONEHOOK_PRO_INCLUDED_TIERS` | Comma-separated tiers that include Pro (no lookup, none sold) | empty | `infinity` |
+| `AZURE_PRO_TABLE` | Table for Pro subscriptions, ledger, notices and the attachment allowance | none | `mronehookpro` |
+| `MR_ONEHOOK_PRO_PRICES` | `{"monthly": paise, "yearly": paise}` | Rs 799 / Rs 5,999 | `mr_onehook_pro_prices` |
+| `MR_ONEHOOK_PRO_PAYMENT_PROVIDER` | `none` or `fake` (moves no money; refused in prod) | `none` | gamma `fake`, prod `none` |
+| `MR_ONEHOOK_PRO_RENEWAL_INTERVAL_MS` | How often the renewal job runs (10 s to 1 h) | `300000` | not set |
+| `MR_ONEHOOK_ENTITLEMENT_QUEUE_URL` | SQS queue of the membership's Pro handover events; empty keeps the worker off | empty | `mr_onehook_entitlement_queue_url` (empty until OneHookBackend creates it) |
+| `CHAT_ATTACHMENTS_ENABLED` | Pro attachments | `false` | `chat_attachments_enabled` (gamma `true`) |
+| `ATTACHMENT_MONTHLY_BUDGET_MINOR` | `{"subscription": paise, "membership": paise}` of Azure cost per member per month | Rs 400 each | `attachment_monthly_budget_minor` |
+| `ATTACHMENT_COST_RATES` | Paise per million input/output tokens, per transcribed minute, per document page | list prices at Rs 84/USD | not set |
+| `ATTACHMENT_BURST_FILES`, `ATTACHMENT_BURST_WINDOW_MS` | Burst limit | 10 per 600000 ms | not set |
+| `AZURE_OPENAI_VISION_DEPLOYMENT`, `AZURE_OPENAI_VISION_API_VERSION` | Image reading | the chat deployment, `2024-10-21` | not set |
+| `AZURE_OPENAI_TRANSCRIPTION_DEPLOYMENT`, `AZURE_OPENAI_TRANSCRIPTION_ENDPOINT`, `AZURE_OPENAI_TRANSCRIPTION_API_VERSION` | Audio and video; empty deployment turns them off | empty, the OpenAI endpoint, `2025-04-01-preview` | from `openai_transcription_deployment` (null by default) |
+| `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` | PDF, Office and HEIC; empty turns them off | empty | the Document Intelligence account when `document_intelligence_enabled` |
+| `ATTACHMENT_MAX_DOCUMENT_PAGES` | Pages read per document (1-500) | `50` | not set |
+| `FFMPEG_PATH` | Optional ffmpeg for video keyframes; without it a video is read from its sound | empty | not set |
 | `CHAT_SESSION_MAX_RETENTION_DAYS` | Retention hard cap (1-365) | `90` | `90` |
 | `UX_ERASURE_QUEUE_URL` | SQS queue `OneHook-Matching-<stage>-UxErasure`; empty turns the erasure worker off | empty | gamma queue URL; prod empty |
 | `UX_ERASURE_CONCURRENCY` | Erasure messages processed at once (1-10) | `4` | not set |
@@ -536,7 +563,8 @@ npm run manifest:sync        # refresh the committed copies after a model change
 ```
 
 `.github/workflows/sdk.yml` builds and tests it on pull requests and, on `main`, sets the version in
-`sdk/package.json` from what changed (`sdk/scripts/api-compat.mjs`: breaking = major, addition = minor, else patch; the 2.x line starts with this check), publishes with npm OIDC trusted publishing and tags `sdk-v<version>`. One-time setup:
+`sdk/package.json` from what changed (`sdk/scripts/api-compat.mjs`: breaking = major, addition = minor, else patch; the 2.x line starts with this check), publishes the built package directory (`./build/package`, avoiding `EPRIVATE` errors) with npm OIDC
+trusted publishing, and tags `sdk-v<version>` (published as `onehook-mr-onehook-client@1.0.1`). One-time setup:
 register the repository and `sdk.yml` as a trusted publisher of `onehook-mr-onehook-client` on npmjs.com.
 `deploy.yml` also builds the SDK before the backend tests, so the server is always checked against the
 model it publishes.
@@ -549,8 +577,9 @@ version. Nothing in this repo writes into OneHookPlatform.
 
 ## API Endpoints
 
-These are the six `MrOneHookService` operations in `sdk/model/mr-onehook.smithy`; the routes are registered in
-`backend/src/app.ts` (`/health`, public chat) and `backend/src/contextRoutes.ts` (member routes). Member
+These are the fifteen `MrOneHookService` operations in `sdk/model/mr-onehook.smithy`; the routes are registered in
+`backend/src/app.ts` (`/health`, public chat), `backend/src/contextRoutes.ts` (member chat and sessions),
+`backend/src/attachmentRoutes.ts` and `backend/src/proRoutes.ts`. Member
 routes take the member's **Cognito ID token** as `Authorization: Bearer <token>`. Errors are
 `{"error": "<CODE or message>"}`, plus `requestId` on the member chat route.
 
@@ -560,8 +589,17 @@ routes take the member's **Cognito ID token** as `Authorization: Bearer <token>`
 | `POST` | `/api/public/product-chat` | None | Anonymous product questions; accepts `{ messages, userDemographics, honeypot }` and cannot access private context |
 | `POST` | `/api/member/product-connection-chat` | Member ID token | Product questions with optional authorized match/profile and app-selected ephemeral message excerpts; tier-gated AI sessions |
 | `GET` | `/api/member/product-connection-chat/sessions` | Member ID token | List the caller's retained AI-session metadata, newest first |
-| `GET` | `/api/member/product-connection-chat/sessions/:sessionId` | Member ID token, eligible current tier | Read one own AI session; connection sessions receive a fresh match authorization check |
-| `DELETE` | `/api/member/product-connection-chat/sessions/:sessionId` | Member ID token | Delete one own retained AI session, including after downgrade |
+| `GET` | `/api/member/product-connection-chat/sessions/:sessionId` | Member ID token, a plan with sessions | Read one own AI session; connection sessions receive a fresh match authorization check |
+| `DELETE` | `/api/member/product-connection-chat/sessions/:sessionId` | Member ID token | Delete one own retained AI session and its files, including after downgrade |
+| `POST` | `/api/member/product-connection-chat/attachments` | Member ID token, Pro | Upload one raw file (5 MiB) for a later turn; `202 PROCESSING` |
+| `GET` | `/api/member/product-connection-chat/attachments/:attachmentId` | Member ID token | An attachment's status (60 requests/minute of its own) |
+| `GET` | `/api/member/product-connection-chat/attachments/:attachmentId/content` | Member ID token | The bytes of the member's own upload |
+| `GET` | `/api/member/mr-onehook-pro` | Member ID token | Plan, Pro subscription, offers, limits, notices |
+| `POST` | `/api/member/mr-onehook-pro/subscription` | Member ID token, `Idempotency-Key` | Buy Pro |
+| `PUT` | `/api/member/mr-onehook-pro/subscription/auto-renew` | Member ID token | Turn auto-renewal off or on |
+| `PUT` | `/api/member/mr-onehook-pro/continuation` | Member ID token, `Idempotency-Key` | Keep Pro after the membership that includes it ends |
+| `DELETE` | `/api/member/mr-onehook-pro/continuation` | Member ID token | Withdraw "Keep Pro" before it starts |
+| `DELETE` | `/api/member/mr-onehook-pro/notices/:noticeId` | Member ID token | Dismiss a notice |
 
 Shared behaviour: JSON bodies over 32 KB get `413`, malformed JSON `400`, unknown paths
 `404 {"error": "Endpoint not found."}`, unexpected errors `500`. While `CONTEXTUAL_AI_ENABLED` is false
@@ -726,33 +764,33 @@ A successful member response discloses categories/counts rather than private con
 ```
 
 Chat error codes (with `requestId` once the request has passed authentication and the rate limit): `400 INVALID_CONTEXTUAL_CHAT_REQUEST`; `401 AUTH_REQUIRED`,
-`INVALID_ACCESS_TOKEN`; `402 MESSAGE_LIMIT_REACHED`; `403 CHAT_SESSION_NOT_INCLUDED_IN_TIER`,
+`INVALID_ACCESS_TOKEN`; `402 MESSAGE_LIMIT_REACHED`; `403 PRO_REQUIRED` (attachments), `CHAT_SESSION_NOT_INCLUDED_IN_TIER`,
 `MESSAGE_CONTEXT_NOT_ALLOWED`; `404 MATCH_NOT_AVAILABLE`, `CHAT_SESSION_NOT_FOUND`, `ENDPOINT_NOT_FOUND`;
 `409 CHAT_SESSION_LIMIT_REACHED`; `429 RATE_LIMITED`, `AI_RATE_LIMITED`; `503 CONTEXT_NOT_CONFIGURED`,
 `CHAT_SESSION_STORAGE_NOT_CONFIGURED`, `CHAT_TEMPORARILY_UNAVAILABLE`, `CONTEXT_TEMPORARILY_UNAVAILABLE`.
 The session routes use `CHAT_SESSION_NOT_FOUND`, `CHAT_SESSION_NOT_INCLUDED_IN_TIER`,
 `CHAT_SESSION_STORAGE_NOT_CONFIGURED` and `CHAT_SESSION_STORAGE_TEMPORARILY_UNAVAILABLE`.
 
-### Cognito tier-based chat sessions
+### Plan-based chat sessions
 
-Session persistence is independent from contextual message-history collection. It works only when the member routes are ready, `CHAT_SESSION_STORAGE_ENABLED=true` and at least one valid tier policy is configured; otherwise a request with `sessionOptions.persist` gets `503 CHAT_SESSION_STORAGE_NOT_CONFIGURED`. The tier is never accepted from the request body. It is read only from the verified ID token (signature, issuer, audience and expiry checked).
+Session persistence is independent from contextual message-history collection. It works only when the member routes are ready, `CHAT_SESSION_STORAGE_ENABLED=true` and at least one valid plan policy is configured; otherwise a request with `sessionOptions.persist` gets `503 CHAT_SESSION_STORAGE_NOT_CONFIGURED`. The plan is never accepted from the request body: it comes from the verified ID token's tier (signature, issuer, audience and expiry checked) and, for a Pro subscription, the `mronehookpro` table.
 
-By default the backend reads `custom:subscriptionTier`. Tier values are parsed by `onehook-api-client` (`Must`, `Super`, `Infinity`, any case); a string claim with an unknown value is treated as Must and logged as `UnknownSubscriptionTier`. To use Cognito groups, configure `AUTH_TIER_CLAIM=cognito:groups`; the first group that parses as a tier with a configured policy is selected. A tier without a policy (Must, by default) cannot create, continue, or read session content (`403 CHAT_SESSION_NOT_INCLUDED_IN_TIER`).
+By default the backend reads `custom:subscriptionTier`. Tier values are parsed by `onehook-api-client` (`Must`, `Super`, `Infinity`, any case); a string claim with an unknown value is treated as Must and logged as `UnknownSubscriptionTier`. To use Cognito groups, configure `AUTH_TIER_CLAIM=cognito:groups`; the highest tier among the groups is used. A plan without a policy cannot create, continue, or read session content (`403 CHAT_SESSION_NOT_INCLUDED_IN_TIER`).
 
-The Terraform default `chat_session_tier_policies` (also what gamma uses):
+The Terraform default `chat_session_plan_policies` (also what gamma uses):
 
 ```json
 {
-  "super":    { "enabled": true, "maxSessions": 3, "maxMessages": 50, "retentionDays": 30 },
-  "infinity": { "enabled": true, "maxSessions": 3, "maxMessages": 50, "retentionDays": 30 }
+  "free": { "enabled": true, "maxSessions": 1, "maxMessages": 50, "retentionDays": 30 },
+  "pro":  { "enabled": true, "maxSessions": 3, "maxMessages": 50, "retentionDays": 30 }
 }
 ```
 
-`CHAT_SESSION_TIER_POLICIES` is that compact JSON; Terraform builds it from the `chat_session_tier_policies` map with snake-case limit fields. Policy keys that are not a tier, `enabled` other than `true`, and limits outside the backend safety bounds (1-100 sessions, 2-200 messages per session, 1 to `CHAT_SESSION_MAX_RETENTION_DAYS` days) are ignored. `maxMessages` is how many recent turns a session keeps and sends to the model (rounded down to an even number), not a sending limit.
+`CHAT_SESSION_PLAN_POLICIES` is that compact JSON; Terraform builds it from the `chat_session_plan_policies` map with snake-case limit fields. Keys that are not a plan, `enabled` other than `true`, and limits outside the backend safety bounds (1-100 sessions, 2-200 messages per session, 1 to `CHAT_SESSION_MAX_RETENTION_DAYS` days) are ignored. `maxMessages` is how many recent turns a session keeps and sends to the model (rounded down to an even number), not a sending limit.
 
 Persistence is opt-in per request. Set `sessionOptions.persist=true` without a `sessionId` to create a session; the response returns `session.sessionId`. Supply that UUID on a later request to continue it (a `sessionId` implies persistence). Send a stable UUID `Idempotency-Key` header when retrying a request: it becomes the `requestId` and exchange id, so the same exchange is not stored twice. Member requests without `sessionOptions` are not stored.
 
-When a new session would exceed the tier's `maxSessions`, the request is refused before the model call with `409 {"error": "CHAT_SESSION_LIMIT_REACHED", "maxSessions": 3, "sessions": [...]}` so the app can offer a choice. Resending with `sessionOptions.replaceLeastRecent: true` deletes the least recently updated session(s) first. The session index re-checks the cap when the turn is saved.
+When a new session would exceed the plan's `maxSessions` (Free: a second session; Pro: a fourth), the least recently active session(s) are deleted right before the new one is saved, and the response lists them in `evictedSessionIds`. A failed model call or a `needsMoreContext` answer deletes nothing. A session the member deleted has already freed its slot. After a downgrade, older sessions can still be continued, and the next new session trims down to the cap. `sessionOptions.replaceLeastRecent` is accepted and ignored. `409 CHAT_SESSION_LIMIT_REACHED` is now only the rare case where concurrent requests keep filling the last slot; retry it.
 
 Session listing returns non-content metadata and a non-identifying scope instead of a raw match ID:
 
@@ -805,7 +843,7 @@ UX Enhancement reauthorizes the match, validates the excerpt envelope, uses it o
 2. Add a `prod` entry to OneHookBackend `infra/config/mr-onehook.ts` with the `aws_federation` output of a prod apply that has `aws_federation_enabled = true`, then deploy the Matching stack so `OneHook-MrOneHook-prod-Role` and `OneHook-Matching-prod-UxErasure` exist.
 3. Fill `auth_issuer`, `auth_audience`, `auth_jwks_uri`, `onehook_data_api_url` (State `execute-api` URL), `onehook_data_api_aws_role_arn`, `onehook_matching_api_url` and `ux_erasure_queue_url` in `prod.tfvars` from the `OneHook-*-prod` outputs. Never point prod at the gamma Cognito pool.
 4. Upload `CRUX.md` to the prod storage account's `codecontext` container (see [Cross-repo dependency](#cross-repo-dependency-onehookclient-context)).
-5. Set `contextual_ai_enabled = true`, and `chat_session_storage_enabled = true` when the tier policies are reviewed, then review the Terraform plan.
+5. Set `contextual_ai_enabled = true`, and `chat_session_storage_enabled = true` when the plan policies are reviewed, then review the Terraform plan. Mr OneHook Pro (`mr_onehook_pro_enabled`, `chat_attachments_enabled`) needs a real payment provider before prod; the fake one is refused there.
 
 ---
 
@@ -1030,18 +1068,32 @@ OneHookUXEnhancement/
 │   │   ├── contextRoutes.ts           # Member chat and session routes
 │   │   ├── contextTypes.ts            # Request parsing and validation
 │   │   ├── contextPrompt.ts           # Member system prompt and model-response parsing
-│   │   ├── chatQuota.ts               # Free-tier daily counters (Table chatquota)
+│   │   ├── chatQuota.ts               # Free plan daily counters (Table chatquota)
+│   │   ├── memberRouting.ts           # Shared member-route helpers: rate limit, idempotency key, plan resolution
+│   │   ├── proSubscriptionService.ts  # Mr OneHook Pro: plan, purchase, renewals, refunds, handover, kept plan
+│   │   ├── proStore.ts                # Pro table (Table mronehookpro), ETag-conditional documents
+│   │   ├── proPayments.ts             # Payment provider interface (StoreKit-shaped) and the fake provider
+│   │   ├── proRoutes.ts               # /api/member/mr-onehook-pro routes
+│   │   ├── proHandoverWorker.ts       # Membership Pro handover SQS consumer; the renewal job scheduler
+│   │   ├── membershipDirectory.ts     # What Pro needs from State (fails closed until State provides it)
+│   │   ├── attachmentRoutes.ts        # Attachment upload, status and content routes
+│   │   ├── attachmentTypes.ts         # File type from the bytes (incl. Office ZIP directory checks)
+│   │   ├── attachmentStore.ts         # Attachment blobs (pending, ephemeral, saved)
+│   │   ├── attachmentProcessor.ts     # Extraction, cost metering, background processing queue
+│   │   ├── attachmentAi.ts            # Azure vision, transcription and Document Intelligence readers
+│   │   ├── attachmentUsage.ts         # Monthly processing allowance and burst limit
 │   │   ├── oneHookDataClient.ts       # State AI-context client (SigV4)
-│   │   ├── plaintextChatSessionStore.ts # Tier-gated application-readable AI sessions
+│   │   ├── plaintextChatSessionStore.ts # Plan-limited application-readable AI sessions (with file references)
 │   │   ├── matchingStatusClient.ts    # State matching-mode read (SigV4) before a suggestion
 │   │   ├── matchingSuggestionClient.ts # Matching suggestion write, gated on matching ON
 │   │   ├── sigv4Signer.ts             # SigV4 signing for execute-api
 │   │   ├── azureAwsCredentials.ts     # Managed identity token -> STS AssumeRoleWithWebIdentity
-│   │   ├── uxErasureWorker.ts         # UserDeleted SQS consumer: erases AI sessions and daily counters
+│   │   ├── uxErasureWorker.ts         # UserDeleted SQS consumer: erases AI sessions, attachments, counters and Pro rows
 │   │   ├── generated/apiManifest.ts   # Generated from OneHookBackend Smithy models; do not edit
 │   │   ├── generated/mrOneHookApiManifest.ts # Generated from sdk/model; do not edit
 │   │   ├── generated/mrOneHookModels.ts      # Request/response types generated from sdk/model; do not edit
-│   │   └── __tests__/                 # node:test suite, incl. contract/ (route and outbound-call scan, vendored OpenAPI)
+│   │   └── __tests__/                 # node:test suite, incl. contract/ (route and outbound-call scan, vendored OpenAPI) and e2e/
+│   ├── scripts/e2e.mjs                # npm run test:e2e: the e2e/ tests on Azurite (in-memory Azure Storage)
 │   ├── package.json
 │   └── tsconfig.json
 ├── sdk/                               # MrOneHookService model + the onehook-mr-onehook-client npm package
@@ -1053,6 +1105,7 @@ OneHookUXEnhancement/
 │   ├── variables.tf
 │   ├── outputs.tf
 │   └── stages/                        # <stage>.tfvars and <stage>.backend.hcl for gamma and prod
+├── docs/mr-onehook-pro.md             # Mr OneHook Pro: plans, subscription rules, attachments, State contract
 ├── CONTEXTUAL_AI_IMPLEMENTATION_PLAN.md
 ├── setup-oidc.sh
 └── README.md
