@@ -357,8 +357,14 @@ variable "document_intelligence_name" {
   default     = "onehook-docintel"
 }
 
+variable "document_intelligence_location" {
+  description = "Region of the Document Intelligence account. Document Intelligence (kind FormRecognizer) is not offered in southindia, so it runs in Central India: documents stay in India and the app reaches it over its regional endpoint."
+  type        = string
+  default     = "centralindia"
+}
+
 variable "openai_transcription_deployment" {
-  description = "Speech-to-text deployment on the OpenAI account for audio and video attachments. null leaves audio and video off. Check the model and version in the Foundry catalog for the region first (gpt-transcribe lists India South)."
+  description = "Speech-to-text deployment on the OpenAI account for audio and video attachments. null leaves audio and video off. The backend calls /audio/transcriptions, so use a speech-to-text model (gpt-4o-transcribe, gpt-4o-mini-transcribe, whisper). Check the model, version, SKU and quota for the region first: az cognitiveservices model list / usage list --location <region>."
   type = object({
     name          = string
     model_name    = string

@@ -36,8 +36,17 @@ mr_onehook_pro_payment_provider = "fake"
 # State's MR_ONEHOOK_PRO_HANDOVER_ENABLED is on for gamma, upgrades into Infinity wait for this worker.
 mr_onehook_entitlement_queue_url = "https://sqs.ap-south-1.amazonaws.com/627367419734/OneHook-Matching-gamma-MrOneHookEntitlements"
 
-# Pro attachments: images (vision on the gpt-4o deployment), documents (Document Intelligence) and text.
-# Audio and video need a speech-to-text deployment: set openai_transcription_deployment once the model
-# and version are confirmed in the Foundry catalog for southindia (gpt-transcribe lists India South).
+# Pro attachments: images (vision on the gpt-4o deployment), documents (Document Intelligence, in
+# centralindia because southindia does not offer it; see document_intelligence_location) and text.
+# Audio and video: gpt-4o-transcribe 2025-03-20 is offered in southindia only as GlobalStandard (Azure may
+# process the audio outside India; stored data stays in southindia). Capacity 20 of the subscription's 400
+# southindia quota, which prod shares. Re-check with: az cognitiveservices usage list --location southindia
 chat_attachments_enabled      = true
 document_intelligence_enabled = true
+openai_transcription_deployment = {
+  name          = "gpt-4o-transcribe"
+  model_name    = "gpt-4o-transcribe"
+  model_version = "2025-03-20"
+  sku_name      = "GlobalStandard"
+  capacity      = 20
+}

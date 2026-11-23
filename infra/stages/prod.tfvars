@@ -45,3 +45,6 @@ ux_erasure_queue_url = ""
 mr_onehook_pro_enabled          = false
 mr_onehook_pro_payment_provider = "none"
 chat_attachments_enabled        = false
+# When attachments are turned on for prod: document_intelligence_enabled = true (the account goes to
+# document_intelligence_location, centralindia) and set openai_transcription_deployment as in gamma.tfvars
+# (gpt-4o-transcribe 2025-03-20 GlobalStandard; the southindia quota of 400 is shared with gamma).

@@ -249,11 +249,12 @@ resource "azurerm_cognitive_deployment" "transcription" {
 }
 
 # Azure AI Document Intelligence (PDF, Office and HEIC attachments). Entra auth only: local keys are
-# disabled, which needs a custom subdomain.
+# disabled, which needs a custom subdomain. Its own region (var.document_intelligence_location): the
+# FormRecognizer kind is not offered in southindia (InvalidApiSetId on create).
 resource "azurerm_cognitive_account" "document_intelligence" {
   count                 = var.document_intelligence_enabled ? 1 : 0
   name                  = "${var.document_intelligence_name}-${random_string.suffix.result}"
-  location              = azurerm_resource_group.rg.location
+  location              = var.document_intelligence_location
   resource_group_name   = azurerm_resource_group.rg.name
   kind                  = "FormRecognizer"
   sku_name              = "S0"
