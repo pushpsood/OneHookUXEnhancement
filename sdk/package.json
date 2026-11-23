@@ -1,6 +1,6 @@
 {
   "name": "mr-onehook-sdk-build",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "Builds the onehook-mr-onehook-client npm package from model/*.smithy. The published version is this file's version.",
   "type": "module",
