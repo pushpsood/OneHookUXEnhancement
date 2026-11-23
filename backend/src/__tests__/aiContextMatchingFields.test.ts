@@ -61,7 +61,7 @@ test('empty or missing projections stay empty', async () => {
 
 function promptFor(match: AiVisibleMatchContext): { profile?: unknown } {
   const { prompt } = buildContextualSystemPrompt(match, {
-    matchId: match.matchId, message: 'help', includeProfile: true, includeMessageHistory: false, persistSession: false,
+    matchId: match.matchId, message: 'help', includeProfile: true, includeMessageHistory: false, persistSession: false, attachmentIds: [],
   }, []);
   const data = /<CONTEXT_DATA>\n([\s\S]*?)\n<\/CONTEXT_DATA>/.exec(prompt)?.[1];
   assert.ok(data, 'context block present');
@@ -87,7 +87,7 @@ test('prompt assembly re-applies the both-or-neither rule to any match context',
 
 test('prompt tells the model never to invent absent profile fields', () => {
   const { prompt } = buildContextualSystemPrompt(matchContext({ displayName: 'Ada' }, { displayName: 'Grace' }), {
-    matchId: 'match-1', message: 'what do they like?', includeProfile: true, includeMessageHistory: false, persistSession: false,
+    matchId: 'match-1', message: 'what do they like?', includeProfile: true, includeMessageHistory: false, persistSession: false, attachmentIds: [],
   }, []);
   assert.match(prompt, /PROFILE may hold only display names/);
   assert.match(prompt, /never guess or invent a bio, interests/);

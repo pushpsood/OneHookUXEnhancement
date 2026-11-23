@@ -42,7 +42,7 @@ test('prompt labels history as untrusted and reports exactly what context was us
     message: 'help',
     includeProfile: true,
     includeMessageHistory: true,
-    persistSession: false,
+    persistSession: false, attachmentIds: [],
   }, [{
     speaker: 'match',
     sentAt: '2026-09-28T00:00:00.000Z',
@@ -76,7 +76,7 @@ test('member prompt supports product-only questions without private match contex
       message: 'How does OneHook work?',
       includeProfile: true,
       includeMessageHistory: true,
-      persistSession: false,
+      persistSession: false, attachmentIds: [],
     },
     [],
     [],

@@ -217,7 +217,7 @@ variable "context_request_max_messages" {
 }
 
 variable "chat_session_storage_enabled" {
-  description = "Enable Cognito-tier-gated Mr OneHook chat-session persistence (Super/Infinity only, per the tier policies). Requires the private aisessions blob container + the App Service identity's Storage Blob Data Contributor role on it (provisioned in main.tf)."
+  description = "Enable saved Mr OneHook chat sessions (every signed-in member, limited per plan by chat_session_plan_policies). Requires the private aisessions blob container + the App Service identity's Storage Blob Data Contributor role on it (provisioned in main.tf)."
   type        = bool
   default     = true
 }
@@ -239,8 +239,8 @@ variable "chat_session_max_retention_days" {
   }
 }
 
-variable "chat_session_tier_policies" {
-  description = "Server-side Mr OneHook AI-session policies keyed by membership tier (must / super / infinity, any case; normalized server-side via onehook-api-client). Must is intentionally absent — it does not get persisted AI sessions, per the membership matrix. Super and Infinity do."
+variable "chat_session_plan_policies" {
+  description = "Saved Mr OneHook chat sessions per plan (free = Must and Super, pro = Mr OneHook Pro or a membership that includes it). A new session at the cap replaces the least recently active one."
   type = map(object({
     enabled        = bool
     max_sessions   = number
@@ -248,16 +248,16 @@ variable "chat_session_tier_policies" {
     retention_days = number
   }))
   default = {
-    # Super and Infinity: unlimited messages; at most 3 saved sessions in total. max_messages is how many
-    # recent turns a session keeps (and sends to the model), not a limit on sending.
-    super = {
+    # Free: one saved session; starting a new one replaces it. max_messages is how many recent turns a
+    # session keeps (and sends to the model), not a sending limit (Free sends 10 messages per UTC day).
+    free = {
       enabled        = true
-      max_sessions   = 3
+      max_sessions   = 1
       max_messages   = 50
       retention_days = 30
     }
-    # Infinity: up to 3 concurrent connections, so a higher session allowance.
-    infinity = {
+    # Pro: three saved sessions; a 4th replaces the least recently active one. Unlimited messages.
+    pro = {
       enabled        = true
       max_sessions   = 3
       max_messages   = 50
@@ -267,12 +267,104 @@ variable "chat_session_tier_policies" {
 
   validation {
     condition = alltrue([
-      for tier, policy in var.chat_session_tier_policies :
-      can(regex("^[a-z0-9][a-z0-9_-]{0,63}$", lower(tier))) &&
+      for plan, policy in var.chat_session_plan_policies :
+      contains(["free", "pro"], lower(plan)) &&
       policy.max_sessions >= 1 && policy.max_sessions <= 100 &&
       policy.max_messages >= 2 && policy.max_messages <= 200 &&
       policy.retention_days >= 1 && policy.retention_days <= var.chat_session_max_retention_days
     ])
-    error_message = "Tier names and session limits must stay within the backend safety bounds."
+    error_message = "Plans are free and pro, with session limits within the backend safety bounds."
   }
+}
+
+# ── Mr OneHook Pro ─────────────────────────────────────────────────────────────
+
+variable "mr_onehook_pro_enabled" {
+  description = "Mr OneHook Pro purchase routes (/api/member/mr-onehook-pro). Plans apply regardless: a membership tier in mr_onehook_pro_included_tiers is Pro."
+  type        = bool
+  default     = false
+}
+
+variable "mr_onehook_pro_included_tiers" {
+  description = "Membership tiers (verified Cognito claim) that include Mr OneHook Pro: no subscription needed, none sold."
+  type        = list(string)
+  default     = ["infinity"]
+}
+
+variable "mr_onehook_pro_prices" {
+  description = "Mr OneHook Pro prices in paise (INR minor unit)."
+  type = object({
+    monthly = number
+    yearly  = number
+  })
+  default = {
+    monthly = 79900  # Rs 799 / month
+    yearly  = 599900 # Rs 5,999 / year (37% off 12 x Rs 799)
+  }
+}
+
+variable "mr_onehook_pro_payment_provider" {
+  description = "Pro payment rail: none (purchases answer 503 PAYMENTS_NOT_CONFIGURED) or fake (moves no money; refused in prod)."
+  type        = string
+  default     = "none"
+
+  validation {
+    condition     = contains(["none", "fake"], var.mr_onehook_pro_payment_provider)
+    error_message = "mr_onehook_pro_payment_provider must be none or fake."
+  }
+
+  validation {
+    condition     = !(var.stage == "prod" && var.mr_onehook_pro_payment_provider == "fake")
+    error_message = "The fake payment provider must never run in prod."
+  }
+}
+
+variable "mr_onehook_entitlement_queue_url" {
+  description = "SQS queue with the membership's Pro handover events (OneHook-Matching-<stage>-MrOneHookEntitlements, OneHookBackend). Empty keeps the handover worker off."
+  type        = string
+  default     = ""
+}
+
+# ── Chat attachments ──────────────────────────────────────────────────────────
+
+variable "chat_attachments_enabled" {
+  description = "Mr OneHook Pro attachments (images, documents, text, audio and video; 5 MiB each). Signed-in chats only; never the public chat."
+  type        = bool
+  default     = false
+}
+
+variable "attachment_monthly_budget_minor" {
+  description = "Monthly file-processing allowance per member in paise of Azure cost, by why the member is on Pro. Kept below the plan's net price (Rs 799 is Rs 677 after GST)."
+  type = object({
+    subscription = number
+    membership   = number
+  })
+  default = {
+    subscription = 40000 # Rs 400
+    membership   = 40000
+  }
+}
+
+variable "document_intelligence_enabled" {
+  description = "Create an Azure AI Document Intelligence account to read PDF, Office and HEIC attachments (prebuilt-read)."
+  type        = bool
+  default     = false
+}
+
+variable "document_intelligence_name" {
+  description = "Document Intelligence account name prefix (a random suffix is added; it is also the custom subdomain Entra auth needs)."
+  type        = string
+  default     = "onehook-docintel"
+}
+
+variable "openai_transcription_deployment" {
+  description = "Speech-to-text deployment on the OpenAI account for audio and video attachments. null leaves audio and video off. Check the model and version in the Foundry catalog for the region first (gpt-transcribe lists India South)."
+  type = object({
+    name          = string
+    model_name    = string
+    model_version = string
+    sku_name      = string
+    capacity      = number
+  })
+  default = null
 }

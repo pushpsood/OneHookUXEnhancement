@@ -65,6 +65,10 @@ jobs:
       - name: Test and Build TypeScript
         working-directory: ./backend
         run: npm test
+      # Mr OneHook Pro end to end on real Azure Storage semantics (Azurite, in memory; no Azure account).
+      - name: End-to-end tests (Azurite)
+        working-directory: ./backend
+        run: npm run test:e2e
 
   deploy-gamma:
     name: Gamma

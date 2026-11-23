@@ -50,6 +50,10 @@ export interface ErasureQueue {
 export interface ErasureResult {
   sessionBlobs: number;
   ledgerRows: number;
+  /** Attachment blobs (when attachments are configured). */
+  attachmentBlobs?: number;
+  /** Mr OneHook Pro rows (when Pro is configured). Charge/refund ledger rows are kept for accounting. */
+  proRows?: number;
 }
 
 export interface UserDataEraser {
@@ -111,20 +115,36 @@ export function parseUserDeletedMessage(body: string): ParsedErasureMessage {
   return { kind: 'erase', userId };
 }
 
-/** Composes the two Azure stores. Both always run; if either fails the whole erasure fails (and retries). */
+interface Erasable {
+  eraseUser(userId: string): Promise<number>;
+}
+
+/**
+ * Composes the Azure stores. All always run; if any fails the whole erasure fails (and retries). Once the
+ * Pro subscription and continuation rows are gone, the renewal job can no longer find the member.
+ */
 export function createUserDataEraser(
-  sessions: { eraseUser(userId: string): Promise<number> },
-  ledger?: { eraseUser(userId: string): Promise<number> },
+  sessions: Erasable,
+  ledger?: Erasable,
+  more: { attachments?: Erasable; pro?: Erasable } = {},
 ): UserDataEraser {
   return {
     async eraseUser(userId: string): Promise<ErasureResult> {
-      const [sessionResult, ledgerResult] = await Promise.allSettled([
+      const [sessionResult, ledgerResult, attachmentResult, proResult] = await Promise.allSettled([
         sessions.eraseUser(userId),
         ledger ? ledger.eraseUser(userId) : Promise.resolve(0),
+        more.attachments ? more.attachments.eraseUser(userId) : Promise.resolve(0),
+        more.pro ? more.pro.eraseUser(userId) : Promise.resolve(0),
       ]);
-      if (sessionResult.status === 'rejected') throw sessionResult.reason;
-      if (ledgerResult.status === 'rejected') throw ledgerResult.reason;
-      return { sessionBlobs: sessionResult.value, ledgerRows: ledgerResult.value };
+      for (const result of [sessionResult, ledgerResult, attachmentResult, proResult]) {
+        if (result.status === 'rejected') throw result.reason;
+      }
+      return {
+        sessionBlobs: (sessionResult as PromiseFulfilledResult<number>).value,
+        ledgerRows: (ledgerResult as PromiseFulfilledResult<number>).value,
+        ...(more.attachments ? { attachmentBlobs: (attachmentResult as PromiseFulfilledResult<number>).value } : {}),
+        ...(more.pro ? { proRows: (proResult as PromiseFulfilledResult<number>).value } : {}),
+      };
     },
   };
 }

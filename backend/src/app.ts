@@ -3,6 +3,7 @@ import cors from 'cors';
 import type { AzureOpenAI } from 'openai';
 import type { ContextualFeatureConfig } from './contextConfig';
 import { createContextualRouter, type ContextualServices } from './contextRoutes';
+import { isAttachmentUpload } from './attachmentRoutes';
 import { parseContextualModelResponse } from './contextPrompt';
 import type { PublicChatMessage, PublicProductChatRequestContent } from './generated/mrOneHookModels';
 
@@ -37,8 +38,15 @@ type ChatRequestBody = Partial<PublicProductChatRequestContent>;
 export function createApp(options: AppOptions): Express {
   const { corsAllowedOrigins, contextualConfig, contextualServices, publicChat } = options;
   const app = express();
-  app.use(cors(corsAllowedOrigins.length > 0 ? { origin: corsAllowedOrigins } : undefined));
-  app.use(express.json({ limit: '32kb' }));
+  app.use(cors({
+    ...(corsAllowedOrigins.length > 0 ? { origin: corsAllowedOrigins } : {}),
+    // The attachment download names the file; the browser may read it.
+    exposedHeaders: ['Content-Disposition'],
+  }));
+  // JSON bodies are capped at 32 KB. The attachment upload reads its own raw body (5 MiB) after it has
+  // checked the token and the plan, so the JSON parser must not consume it.
+  const jsonBody = express.json({ limit: '32kb' });
+  app.use((req: Request, res: Response, next: NextFunction) => (isAttachmentUpload(req) ? next() : jsonBody(req, res, next)));
 
   app.use(createContextualRouter(contextualConfig, contextualServices));
 
@@ -100,6 +108,13 @@ export function createApp(options: AppOptions): Express {
 
       if (!messages || !Array.isArray(messages)) {
         res.status(400).json({ error: 'Invalid messages array.' });
+        return;
+      }
+      // The public homepage chat never takes files: attachments are for signed-in Mr OneHook Pro chats.
+      const body = req.body as Record<string, unknown>;
+      if ('attachmentIds' in body || 'attachments' in body
+        || messages.some((m) => typeof m !== 'object' || m === null || typeof (m as { content?: unknown }).content !== 'string')) {
+        res.status(400).json({ error: 'Attachments are not supported in this chat.' });
         return;
       }
 

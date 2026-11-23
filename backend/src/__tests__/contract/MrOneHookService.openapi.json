@@ -5,9 +5,605 @@
         "version": "2026-11-01"
     },
     "paths": {
+        "/api/member/mr-onehook-pro": {
+            "get": {
+                "description": "The member's Mr OneHook plan, Pro subscription, prices, limits and notices (refunds, renewals, ...).",
+                "operationId": "GetMrOneHookPro",
+                "responses": {
+                    "200": {
+                        "description": "GetMrOneHookPro 200 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/GetMrOneHookProResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/member/mr-onehook-pro/continuation": {
+            "delete": {
+                "description": "Withdraws \"Keep Mr OneHook Pro\" before it starts: nothing is charged. Idempotent (204 when there is none).\n409 `CONTINUATION_ALREADY_STARTED` once the first charge was made (turn auto-renew off instead).",
+                "operationId": "CancelMrOneHookProContinuation",
+                "responses": {
+                    "204": {
+                        "description": "CancelMrOneHookProContinuation 204 response"
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "ConflictError 409 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ConflictErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "\"Keep Mr OneHook Pro\" while cancelling the membership that includes it: schedules a Pro subscription\nwhose first charge is on the day the membership's paid period ends. If the membership ends earlier\n(other than a refund or chargeback), Pro stays free until that original day. Nothing is charged now.\n`Idempotency-Key` (UUID) is required.\n\nCodes: 400 `INVALID_PRO_REQUEST`; 409 `MEMBERSHIP_NOT_ENDING` (the membership does not include Pro or is\nnot set to end), `PRO_ALREADY_ACTIVE`; 503 `PAYMENTS_NOT_CONFIGURED`, `PRO_TEMPORARILY_UNAVAILABLE`\n(the membership could not be checked).",
+                "operationId": "ContinueMrOneHookProAfterMembership",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ContinueMrOneHookProAfterMembershipRequestContent"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "parameters": [
+                    {
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "description": "UUID; required.",
+                        "schema": {
+                            "type": "string",
+                            "description": "UUID; required."
+                        },
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ContinueMrOneHookProAfterMembership 200 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ContinueMrOneHookProAfterMembershipResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "BadRequestError 400 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequestErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "ConflictError 409 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ConflictErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/member/mr-onehook-pro/notices/{noticeId}": {
+            "delete": {
+                "description": "Dismisses one notice. Idempotent: an unknown id is also 204.",
+                "operationId": "DismissMrOneHookProNotice",
+                "parameters": [
+                    {
+                        "name": "noticeId",
+                        "in": "path",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "DismissMrOneHookProNotice 204 response"
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/member/mr-onehook-pro/subscription": {
+            "post": {
+                "description": "Buys Mr OneHook Pro. `Idempotency-Key` (UUID) is required: a retry with the same key returns the same\nresult and never charges twice.\n\nCodes: 400 `INVALID_PRO_REQUEST`; 402 `PAYMENT_DECLINED`; 409 `PRO_INCLUDED_IN_MEMBERSHIP` (the\nmembership already includes Pro; nothing is charged), `PRO_ALREADY_ACTIVE`, `PRO_PURCHASE_IN_PROGRESS`;\n503 `PAYMENTS_NOT_CONFIGURED`, `PRO_TEMPORARILY_UNAVAILABLE`.",
+                "operationId": "PurchaseMrOneHookPro",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PurchaseMrOneHookProRequestContent"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "parameters": [
+                    {
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "description": "UUID; required.",
+                        "schema": {
+                            "type": "string",
+                            "description": "UUID; required."
+                        },
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "PurchaseMrOneHookPro 200 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PurchaseMrOneHookProResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "BadRequestError 400 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequestErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "402": {
+                        "description": "PaymentDeclinedError 402 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaymentDeclinedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "ConflictError 409 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ConflictErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/member/mr-onehook-pro/subscription/auto-renew": {
+            "put": {
+                "description": "Turns the Pro subscription's auto-renewal off (Pro continues to the end of the paid period) or back on.\nCodes: 400 `INVALID_PRO_REQUEST`; 404 `PRO_SUBSCRIPTION_NOT_FOUND`; 409 `PRO_PAUSED_FOR_MEMBERSHIP`\n(the membership covers Pro now; nothing renews); 503 `PRO_TEMPORARILY_UNAVAILABLE`.",
+                "operationId": "UpdateMrOneHookProAutoRenew",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UpdateMrOneHookProAutoRenewRequestContent"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "UpdateMrOneHookProAutoRenew 200 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UpdateMrOneHookProAutoRenewResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "BadRequestError 400 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequestErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "ConflictError 409 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ConflictErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/member/product-connection-chat": {
             "post": {
-                "description": "One chat turn with Mr OneHook: a product question, or (with `matchId`) help with one connection.\n\nCodes: 400 `INVALID_CONTEXTUAL_CHAT_REQUEST`; 401 `AUTH_REQUIRED`, `INVALID_ACCESS_TOKEN`; 402\n`MESSAGE_LIMIT_REACHED` (free tier: 10 messages per UTC day); 403 `CHAT_SESSION_NOT_INCLUDED_IN_TIER`,\n`MESSAGE_CONTEXT_NOT_ALLOWED`; 404 `MATCH_NOT_AVAILABLE`, `CHAT_SESSION_NOT_FOUND`,\n`ENDPOINT_NOT_FOUND`; 409 `CHAT_SESSION_LIMIT_REACHED`; 429 `RATE_LIMITED`, `AI_RATE_LIMITED`; 503\n`CONTEXT_NOT_CONFIGURED`, `CHAT_SESSION_STORAGE_NOT_CONFIGURED`, `CHAT_TEMPORARILY_UNAVAILABLE`,\n`CONTEXT_TEMPORARILY_UNAVAILABLE`.",
+                "description": "One chat turn with Mr OneHook: a product question, or (with `matchId`) help with one connection.\n\nCodes: 400 `INVALID_CONTEXTUAL_CHAT_REQUEST`, `ATTACHMENT_NOT_USABLE` (an attachment failed processing\nor belongs to another chat); 401 `AUTH_REQUIRED`, `INVALID_ACCESS_TOKEN`; 402 `MESSAGE_LIMIT_REACHED`\n(Free plan: 10 messages per UTC day); 403 `CHAT_SESSION_NOT_INCLUDED_IN_TIER`,\n`MESSAGE_CONTEXT_NOT_ALLOWED`, `PRO_REQUIRED` (attachments need Mr OneHook Pro); 404\n`MATCH_NOT_AVAILABLE`, `CHAT_SESSION_NOT_FOUND`, `ATTACHMENT_NOT_FOUND`, `ENDPOINT_NOT_FOUND`; 409\n`ATTACHMENT_NOT_READY` (still processing: poll `GetChatAttachment`), `CHAT_SESSION_LIMIT_REACHED` (a\nconcurrent request filled the plan's sessions; retry); 429 `RATE_LIMITED`, `AI_RATE_LIMITED`; 503\n`CONTEXT_NOT_CONFIGURED`, `CHAT_SESSION_STORAGE_NOT_CONFIGURED`, `CHAT_TEMPORARILY_UNAVAILABLE`,\n`CONTEXT_TEMPORARILY_UNAVAILABLE`.\n\nSaved sessions: at the plan's cap (Free 1, Pro 3) a new session deletes the least recently active\none(s) first and lists them in `evictedSessionIds`.",
                 "operationId": "ProductConnectionChat",
                 "requestBody": {
                     "content": {
@@ -144,6 +740,357 @@
                 }
             }
         },
+        "/api/member/product-connection-chat/attachments": {
+            "post": {
+                "description": "Uploads one file for a later chat turn (Mr OneHook Pro only; never on the public chat). The body is the\nraw file, at most 5 MiB (`413 ATTACHMENT_TOO_LARGE`). The type is read from the bytes, not the name or\n`Content-Type`. Mr OneHook extracts everything from it in the background (images are described and their\ntext read, documents are read, audio and video are transcribed): poll `GetChatAttachment` until `READY`,\nthen send its id in `attachmentIds`.\n\nA file from a match chat (decrypted on the device) sets `X-Attachment-Match-Id` and\n`X-Attachment-Sender`; it is used for one turn of that connection chat, then deleted, and its contents are\nnever saved. A file the other person sent needs the match's `messageHistoryAllowed`.\n\nCodes: 400 `INVALID_ATTACHMENT_REQUEST`; 403 `PRO_REQUIRED`, `MESSAGE_CONTEXT_NOT_ALLOWED`; 404\n`MATCH_NOT_AVAILABLE`, `ENDPOINT_NOT_FOUND`; 413 `ATTACHMENT_TOO_LARGE`; 415\n`UNSUPPORTED_ATTACHMENT_TYPE`; 429 `RATE_LIMITED`, `ATTACHMENT_PROCESSING_UNAVAILABLE` (too many files\nrecently or this month; chat still works; `retryAt` says when files work again); 503\n`ATTACHMENTS_NOT_CONFIGURED`, `ATTACHMENTS_TEMPORARILY_UNAVAILABLE`, `CONTEXT_TEMPORARILY_UNAVAILABLE`.",
+                "operationId": "UploadChatAttachment",
+                "requestBody": {
+                    "content": {
+                        "application/octet-stream": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UploadChatAttachmentInputPayload"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "parameters": [
+                    {
+                        "name": "Content-Type",
+                        "in": "header",
+                        "description": "What the app believes the file is; checked against the bytes.",
+                        "schema": {
+                            "type": "string",
+                            "description": "What the app believes the file is; checked against the bytes."
+                        },
+                        "required": true
+                    },
+                    {
+                        "name": "X-Attachment-Match-Id",
+                        "in": "header",
+                        "description": "The match whose chat the file came from (a file decrypted from a match chat).",
+                        "schema": {
+                            "type": "string",
+                            "description": "The match whose chat the file came from (a file decrypted from a match chat)."
+                        }
+                    },
+                    {
+                        "name": "X-Attachment-Name",
+                        "in": "header",
+                        "description": "The file name, percent-encoded UTF-8 (1 to 255 characters once decoded).",
+                        "schema": {
+                            "type": "string",
+                            "description": "The file name, percent-encoded UTF-8 (1 to 255 characters once decoded)."
+                        },
+                        "required": true
+                    },
+                    {
+                        "name": "X-Attachment-Sender",
+                        "in": "header",
+                        "description": "Who sent the file in that match chat. Required with `matchId`.",
+                        "schema": {
+                            "$ref": "#/components/schemas/ExcerptSpeaker"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "UploadChatAttachment 202 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UploadChatAttachmentResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "BadRequestError 400 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequestErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "ForbiddenError 403 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "UnsupportedMediaTypeError 415 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnsupportedMediaTypeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/member/product-connection-chat/attachments/{attachmentId}": {
+            "get": {
+                "description": "One of the member's attachments and its processing status. 404 `ATTACHMENT_NOT_FOUND` for an unknown\nid or another member's file. Polling does not count against the 20 requests per minute (60 per minute).",
+                "operationId": "GetChatAttachment",
+                "parameters": [
+                    {
+                        "name": "attachmentId",
+                        "in": "path",
+                        "description": "UUID.",
+                        "schema": {
+                            "type": "string",
+                            "description": "UUID."
+                        },
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "GetChatAttachment 200 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/GetChatAttachmentResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/member/product-connection-chat/attachments/{attachmentId}/content": {
+            "get": {
+                "description": "The bytes of one of the member's uploaded files, to show it in a reopened session. Files from a match\nchat are never kept, so they are 404. Served as an attachment download with `nosniff`.",
+                "operationId": "GetChatAttachmentContent",
+                "parameters": [
+                    {
+                        "name": "attachmentId",
+                        "in": "path",
+                        "description": "UUID.",
+                        "schema": {
+                            "type": "string",
+                            "description": "UUID."
+                        },
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "GetChatAttachmentContent 200 response",
+                        "headers": {
+                            "Content-Disposition": {
+                                "schema": {
+                                    "type": "string"
+                                },
+                                "required": true
+                            },
+                            "Content-Type": {
+                                "schema": {
+                                    "type": "string"
+                                },
+                                "required": true
+                            }
+                        },
+                        "content": {
+                            "application/octet-stream": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/GetChatAttachmentContentOutputPayload"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "UnauthorizedError 401 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "NotFoundError 404 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "PayloadTooLargeError 413 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PayloadTooLargeErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "TooManyRequestsError 429 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TooManyRequestsErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "InternalServerError 500 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "ServiceUnavailableError 503 response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/member/product-connection-chat/sessions": {
             "get": {
                 "description": "The member's saved chat sessions, newest first (expired ones are left out).\n503 `CHAT_SESSION_STORAGE_TEMPORARILY_UNAVAILABLE` when the store cannot be read.",
@@ -224,7 +1171,7 @@
         },
         "/api/member/product-connection-chat/sessions/{sessionId}": {
             "delete": {
-                "description": "Deletes a saved session. Idempotent: an unknown UUID is also 204.",
+                "description": "Deletes a saved session and the files sent in it. Idempotent: an unknown UUID is also 204.",
                 "operationId": "DeleteChatSession",
                 "parameters": [
                     {
@@ -534,6 +1481,64 @@
     },
     "components": {
         "schemas": {
+            "AttachmentFailureReason": {
+                "type": "string",
+                "enum": [
+                    "UNREADABLE",
+                    "TOO_LONG",
+                    "PROCESSING_UNAVAILABLE"
+                ]
+            },
+            "AttachmentKind": {
+                "type": "string",
+                "enum": [
+                    "image",
+                    "document",
+                    "text",
+                    "audio",
+                    "video"
+                ]
+            },
+            "AttachmentSource": {
+                "type": "string",
+                "enum": [
+                    "upload",
+                    "match_chat"
+                ]
+            },
+            "AttachmentStatus": {
+                "type": "string",
+                "enum": [
+                    "PROCESSING",
+                    "READY",
+                    "FAILED"
+                ]
+            },
+            "AttachmentUsage": {
+                "type": "object",
+                "properties": {
+                    "usedPercent": {
+                        "type": "integer",
+                        "maximum": 100,
+                        "minimum": 0,
+                        "description": "0 to 100: share of this month's file-processing allowance used.",
+                        "format": "int32"
+                    },
+                    "warning": {
+                        "type": "boolean",
+                        "description": "True from 80%."
+                    },
+                    "resetsAt": {
+                        "type": "string",
+                        "description": "ISO-8601: when the allowance resets (start of the next UTC month)."
+                    }
+                },
+                "required": [
+                    "resetsAt",
+                    "usedPercent",
+                    "warning"
+                ]
+            },
             "BadRequestErrorResponseContent": {
                 "type": "object",
                 "description": "Mr OneHook's error body. On member routes `error` is a stable UPPER_SNAKE_CASE code; on the public\nroute it is a human-readable message.",
@@ -548,6 +1553,86 @@
                 },
                 "required": [
                     "error"
+                ]
+            },
+            "ChatAttachment": {
+                "type": "object",
+                "properties": {
+                    "attachmentId": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "kind": {
+                        "$ref": "#/components/schemas/AttachmentKind"
+                    },
+                    "mediaType": {
+                        "type": "string",
+                        "description": "The type read from the bytes (e.g. `image/png`)."
+                    },
+                    "sizeBytes": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/AttachmentStatus"
+                    },
+                    "source": {
+                        "$ref": "#/components/schemas/AttachmentSource"
+                    },
+                    "sender": {
+                        "$ref": "#/components/schemas/ExcerptSpeaker"
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "expiresAt": {
+                        "type": "string",
+                        "description": "ISO-8601. Unsent files and match-chat files are deleted after a day."
+                    },
+                    "failureReason": {
+                        "$ref": "#/components/schemas/AttachmentFailureReason"
+                    }
+                },
+                "required": [
+                    "attachmentId",
+                    "createdAt",
+                    "expiresAt",
+                    "kind",
+                    "mediaType",
+                    "name",
+                    "sizeBytes",
+                    "source",
+                    "status"
+                ]
+            },
+            "ChatAttachmentRef": {
+                "type": "object",
+                "description": "A file sent with a saved turn. Files from a match chat have no `attachmentId`: they were not kept.",
+                "properties": {
+                    "attachmentId": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "kind": {
+                        "$ref": "#/components/schemas/AttachmentKind"
+                    },
+                    "sizeBytes": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "source": {
+                        "$ref": "#/components/schemas/AttachmentSource"
+                    }
+                },
+                "required": [
+                    "kind",
+                    "name",
+                    "source"
                 ]
             },
             "ChatSessionDetail": {
@@ -640,6 +1725,13 @@
                     },
                     "mood": {
                         "$ref": "#/components/schemas/Mood"
+                    },
+                    "attachments": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ChatAttachmentRef"
+                        },
+                        "description": "Files sent with this (user) turn."
                     }
                 },
                 "required": [
@@ -695,6 +1787,22 @@
                     "scope",
                     "sessionId",
                     "updatedAt"
+                ]
+            },
+            "ConflictErrorResponseContent": {
+                "type": "object",
+                "description": "409: the request conflicts with the member's current Pro state (`code` in `error`).",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    }
+                },
+                "required": [
+                    "error"
                 ]
             },
             "ContextDateRange": {
@@ -779,6 +1887,11 @@
                     "sessionMessageCount": {
                         "type": "integer",
                         "format": "int32"
+                    },
+                    "attachmentCount": {
+                        "type": "integer",
+                        "description": "Attachments read for this turn.",
+                        "format": "int32"
                     }
                 },
                 "required": [
@@ -788,6 +1901,68 @@
                     "messageHistory",
                     "profile",
                     "sessionMessageCount"
+                ]
+            },
+            "ContinueMrOneHookProAfterMembershipRequestContent": {
+                "type": "object",
+                "properties": {
+                    "billingPeriod": {
+                        "$ref": "#/components/schemas/ProBillingPeriod"
+                    },
+                    "paymentToken": {
+                        "type": "string",
+                        "maxLength": 16384,
+                        "minLength": 1,
+                        "description": "As in `PurchaseMrOneHookPro`; charged on `scheduledStartAt`, not now."
+                    }
+                },
+                "required": [
+                    "billingPeriod"
+                ]
+            },
+            "ContinueMrOneHookProAfterMembershipResponseContent": {
+                "type": "object",
+                "properties": {
+                    "plan": {
+                        "$ref": "#/components/schemas/MrOneHookPlan"
+                    },
+                    "source": {
+                        "$ref": "#/components/schemas/MrOneHookProSource"
+                    },
+                    "subscription": {
+                        "$ref": "#/components/schemas/ProSubscription"
+                    },
+                    "canPurchase": {
+                        "type": "boolean",
+                        "description": "True when `PurchaseMrOneHookPro` would be accepted."
+                    },
+                    "offers": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProOffer"
+                        }
+                    },
+                    "limits": {
+                        "$ref": "#/components/schemas/MrOneHookPlanLimits"
+                    },
+                    "attachmentUsage": {
+                        "$ref": "#/components/schemas/AttachmentUsage"
+                    },
+                    "notices": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProNotice"
+                        },
+                        "description": "Newest first, at most 20."
+                    }
+                },
+                "required": [
+                    "canPurchase",
+                    "limits",
+                    "notices",
+                    "offers",
+                    "plan",
+                    "source"
                 ]
             },
             "EphemeralMessageContext": {
@@ -857,6 +2032,21 @@
                     "error"
                 ]
             },
+            "GetChatAttachmentContentOutputPayload": {
+                "type": "string",
+                "format": "byte"
+            },
+            "GetChatAttachmentResponseContent": {
+                "type": "object",
+                "properties": {
+                    "attachment": {
+                        "$ref": "#/components/schemas/ChatAttachment"
+                    }
+                },
+                "required": [
+                    "attachment"
+                ]
+            },
             "GetChatSessionResponseContent": {
                 "type": "object",
                 "properties": {
@@ -883,6 +2073,51 @@
                 "required": [
                     "status",
                     "timestamp"
+                ]
+            },
+            "GetMrOneHookProResponseContent": {
+                "type": "object",
+                "properties": {
+                    "plan": {
+                        "$ref": "#/components/schemas/MrOneHookPlan"
+                    },
+                    "source": {
+                        "$ref": "#/components/schemas/MrOneHookProSource"
+                    },
+                    "subscription": {
+                        "$ref": "#/components/schemas/ProSubscription"
+                    },
+                    "canPurchase": {
+                        "type": "boolean",
+                        "description": "True when `PurchaseMrOneHookPro` would be accepted."
+                    },
+                    "offers": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProOffer"
+                        }
+                    },
+                    "limits": {
+                        "$ref": "#/components/schemas/MrOneHookPlanLimits"
+                    },
+                    "attachmentUsage": {
+                        "$ref": "#/components/schemas/AttachmentUsage"
+                    },
+                    "notices": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProNotice"
+                        },
+                        "description": "Newest first, at most 20."
+                    }
+                },
+                "required": [
+                    "canPurchase",
+                    "limits",
+                    "notices",
+                    "offers",
+                    "plan",
+                    "source"
                 ]
             },
             "InternalServerErrorResponseContent": {
@@ -967,6 +2202,54 @@
                     "Excited"
                 ]
             },
+            "MrOneHookPlan": {
+                "type": "string",
+                "enum": [
+                    "FREE",
+                    "PRO"
+                ]
+            },
+            "MrOneHookPlanLimits": {
+                "type": "object",
+                "properties": {
+                    "dailyMessages": {
+                        "type": "integer",
+                        "description": "Messages per UTC day; absent means unlimited.",
+                        "format": "int32"
+                    },
+                    "maxSessions": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "attachmentsAllowed": {
+                        "type": "boolean"
+                    },
+                    "maxAttachmentBytes": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "maxAttachmentsPerMessage": {
+                        "type": "integer",
+                        "format": "int32"
+                    }
+                },
+                "required": [
+                    "attachmentsAllowed",
+                    "maxAttachmentBytes",
+                    "maxAttachmentsPerMessage",
+                    "maxSessions"
+                ]
+            },
+            "MrOneHookProSource": {
+                "type": "string",
+                "description": "Why the member is on Pro.",
+                "enum": [
+                    "NONE",
+                    "SUBSCRIPTION",
+                    "MEMBERSHIP",
+                    "COMPLIMENTARY"
+                ]
+            },
             "NotFoundErrorResponseContent": {
                 "type": "object",
                 "description": "Mr OneHook's error body. On member routes `error` is a stable UPPER_SNAKE_CASE code; on the public\nroute it is a human-readable message.",
@@ -999,6 +2282,219 @@
                     "error"
                 ]
             },
+            "PaymentDeclinedErrorResponseContent": {
+                "type": "object",
+                "description": "402 `PAYMENT_DECLINED`: the payment provider declined the charge. Nothing was bought.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "ProBillingPeriod": {
+                "type": "string",
+                "enum": [
+                    "MONTHLY",
+                    "YEARLY"
+                ]
+            },
+            "ProEndedReason": {
+                "type": "string",
+                "enum": [
+                    "CANCELLED",
+                    "PAYMENT_FAILED",
+                    "INCLUDED_IN_MEMBERSHIP",
+                    "CONTINUATION_WITHDRAWN",
+                    "REFUNDED",
+                    "PAYMENT_DECLINED"
+                ]
+            },
+            "ProNotice": {
+                "type": "object",
+                "properties": {
+                    "noticeId": {
+                        "type": "string"
+                    },
+                    "kind": {
+                        "$ref": "#/components/schemas/ProNoticeKind"
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "amountMinor": {
+                        "type": "integer",
+                        "description": "Refunds and charges.",
+                        "format": "int32"
+                    },
+                    "currency": {
+                        "type": "string"
+                    },
+                    "at": {
+                        "type": "string",
+                        "description": "ISO-8601: the date the notice is about (refund date, first charge, end of Pro)."
+                    }
+                },
+                "required": [
+                    "createdAt",
+                    "kind",
+                    "noticeId"
+                ]
+            },
+            "ProNoticeKind": {
+                "type": "string",
+                "enum": [
+                    "PRO_PURCHASED",
+                    "PRO_RENEWED",
+                    "PRO_RENEWAL_FAILED",
+                    "PRO_ENDED",
+                    "PRO_PAUSED_FOR_MEMBERSHIP",
+                    "PRO_REFUND_SCHEDULED",
+                    "PRO_REFUND_ISSUED",
+                    "PRO_REFUND_CANCELLED",
+                    "PRO_RESUMED",
+                    "PRO_CONTINUATION_SCHEDULED",
+                    "PRO_CONTINUATION_CANCELLED",
+                    "PRO_CONTINUATION_STARTED",
+                    "ATTACHMENT_USAGE_WARNING"
+                ]
+            },
+            "ProOffer": {
+                "type": "object",
+                "properties": {
+                    "billingPeriod": {
+                        "$ref": "#/components/schemas/ProBillingPeriod"
+                    },
+                    "priceMinor": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "currency": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "billingPeriod",
+                    "currency",
+                    "priceMinor"
+                ]
+            },
+            "ProRefund": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "$ref": "#/components/schemas/ProRefundStatus"
+                    },
+                    "amountMinor": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "currency": {
+                        "type": "string"
+                    },
+                    "dueAt": {
+                        "type": "string",
+                        "description": "ISO-8601: the end of the Pro month in progress when the membership started."
+                    },
+                    "issuedAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    }
+                },
+                "required": [
+                    "amountMinor",
+                    "currency",
+                    "dueAt",
+                    "status"
+                ]
+            },
+            "ProRefundStatus": {
+                "type": "string",
+                "enum": [
+                    "SCHEDULED",
+                    "ISSUED",
+                    "CANCELLED"
+                ]
+            },
+            "ProSubscription": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "$ref": "#/components/schemas/ProSubscriptionStatus"
+                    },
+                    "billingPeriod": {
+                        "$ref": "#/components/schemas/ProBillingPeriod"
+                    },
+                    "autoRenew": {
+                        "type": "boolean"
+                    },
+                    "priceMinor": {
+                        "type": "integer",
+                        "description": "Price per period in the currency's minor unit (paise).",
+                        "format": "int32"
+                    },
+                    "currency": {
+                        "type": "string",
+                        "description": "ISO 4217, e.g. `INR`."
+                    },
+                    "pausedForMembership": {
+                        "type": "boolean",
+                        "description": "True while the membership covers Pro: nothing renews."
+                    },
+                    "currentPeriodStart": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    },
+                    "currentPeriodEnd": {
+                        "type": "string",
+                        "description": "ISO-8601. Pro lasts until then."
+                    },
+                    "nextChargeAt": {
+                        "type": "string",
+                        "description": "ISO-8601. When the next charge is due (absent when nothing will be charged)."
+                    },
+                    "scheduledStartAt": {
+                        "type": "string",
+                        "description": "ISO-8601. `SCHEDULED` only: the first charge."
+                    },
+                    "refund": {
+                        "$ref": "#/components/schemas/ProRefund"
+                    },
+                    "endedReason": {
+                        "$ref": "#/components/schemas/ProEndedReason"
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "description": "ISO-8601."
+                    }
+                },
+                "required": [
+                    "autoRenew",
+                    "billingPeriod",
+                    "createdAt",
+                    "currency",
+                    "pausedForMembership",
+                    "priceMinor",
+                    "status"
+                ]
+            },
+            "ProSubscriptionStatus": {
+                "type": "string",
+                "enum": [
+                    "PENDING",
+                    "SCHEDULED",
+                    "ACTIVE",
+                    "GRACE",
+                    "ENDED"
+                ]
+            },
             "ProductConnectionChatRequestContent": {
                 "type": "object",
                 "properties": {
@@ -1025,6 +2521,15 @@
                     },
                     "sessionOptions": {
                         "$ref": "#/components/schemas/SessionOptions"
+                    },
+                    "attachmentIds": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "maxItems": 3,
+                        "minItems": 1,
+                        "description": "Up to 3 `READY` attachments (Mr OneHook Pro). Files from a match chat need the same `matchId`."
                     }
                 },
                 "required": [
@@ -1065,6 +2570,16 @@
                     },
                     "session": {
                         "$ref": "#/components/schemas/SavedSessionRef"
+                    },
+                    "evictedSessionIds": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Saved sessions deleted to make room for this new one (least recently active first)."
+                    },
+                    "plan": {
+                        "$ref": "#/components/schemas/MrOneHookPlan"
                     }
                 },
                 "required": [
@@ -1134,6 +2649,68 @@
                     "reply"
                 ]
             },
+            "PurchaseMrOneHookProRequestContent": {
+                "type": "object",
+                "properties": {
+                    "billingPeriod": {
+                        "$ref": "#/components/schemas/ProBillingPeriod"
+                    },
+                    "paymentToken": {
+                        "type": "string",
+                        "maxLength": 16384,
+                        "minLength": 1,
+                        "description": "The payment provider's token for this purchase. The App Store provider takes the StoreKit 2 signed\ntransaction (bought with `appAccountToken` = the member's Cognito `sub`); the gamma test provider\ntakes `fake-ok`, `fake-decline` or `fake-decline-renewal`."
+                    }
+                },
+                "required": [
+                    "billingPeriod"
+                ]
+            },
+            "PurchaseMrOneHookProResponseContent": {
+                "type": "object",
+                "properties": {
+                    "plan": {
+                        "$ref": "#/components/schemas/MrOneHookPlan"
+                    },
+                    "source": {
+                        "$ref": "#/components/schemas/MrOneHookProSource"
+                    },
+                    "subscription": {
+                        "$ref": "#/components/schemas/ProSubscription"
+                    },
+                    "canPurchase": {
+                        "type": "boolean",
+                        "description": "True when `PurchaseMrOneHookPro` would be accepted."
+                    },
+                    "offers": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProOffer"
+                        }
+                    },
+                    "limits": {
+                        "$ref": "#/components/schemas/MrOneHookPlanLimits"
+                    },
+                    "attachmentUsage": {
+                        "$ref": "#/components/schemas/AttachmentUsage"
+                    },
+                    "notices": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProNotice"
+                        },
+                        "description": "Newest first, at most 20."
+                    }
+                },
+                "required": [
+                    "canPurchase",
+                    "limits",
+                    "notices",
+                    "offers",
+                    "plan",
+                    "source"
+                ]
+            },
             "SavedSessionRef": {
                 "type": "object",
                 "properties": {
@@ -1178,7 +2755,7 @@
             },
             "SessionOptions": {
                 "type": "object",
-                "description": "Saving the conversation needs a paid tier (403 `CHAT_SESSION_NOT_INCLUDED_IN_TIER` otherwise).",
+                "description": "Every signed-in member may save sessions; the plan sets how many (Free 1, Pro 3).",
                 "properties": {
                     "persist": {
                         "type": "boolean",
@@ -1190,7 +2767,7 @@
                     },
                     "replaceLeastRecent": {
                         "type": "boolean",
-                        "description": "At the tier's session cap, delete the least recently active session instead of answering 409."
+                        "description": "Deprecated and ignored: at the plan's cap the least recently active session is always replaced\n(see `evictedSessionIds`)."
                     }
                 }
             },
@@ -1213,6 +2790,10 @@
                     "requestId": {
                         "type": "string",
                         "description": "The turn's id, on `ProductConnectionChat` errors."
+                    },
+                    "retryAt": {
+                        "type": "string",
+                        "description": "ISO-8601, `ATTACHMENT_PROCESSING_UNAVAILABLE` only: when files can be processed again."
                     }
                 },
                 "required": [
@@ -1233,6 +2814,94 @@
                 },
                 "required": [
                     "error"
+                ]
+            },
+            "UnsupportedMediaTypeErrorResponseContent": {
+                "type": "object",
+                "description": "415 `UNSUPPORTED_ATTACHMENT_TYPE`: the bytes are not a supported file type.",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "requestId": {
+                        "type": "string",
+                        "description": "The turn's id, on `ProductConnectionChat` errors."
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "UpdateMrOneHookProAutoRenewRequestContent": {
+                "type": "object",
+                "properties": {
+                    "autoRenew": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "autoRenew"
+                ]
+            },
+            "UpdateMrOneHookProAutoRenewResponseContent": {
+                "type": "object",
+                "properties": {
+                    "plan": {
+                        "$ref": "#/components/schemas/MrOneHookPlan"
+                    },
+                    "source": {
+                        "$ref": "#/components/schemas/MrOneHookProSource"
+                    },
+                    "subscription": {
+                        "$ref": "#/components/schemas/ProSubscription"
+                    },
+                    "canPurchase": {
+                        "type": "boolean",
+                        "description": "True when `PurchaseMrOneHookPro` would be accepted."
+                    },
+                    "offers": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProOffer"
+                        }
+                    },
+                    "limits": {
+                        "$ref": "#/components/schemas/MrOneHookPlanLimits"
+                    },
+                    "attachmentUsage": {
+                        "$ref": "#/components/schemas/AttachmentUsage"
+                    },
+                    "notices": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProNotice"
+                        },
+                        "description": "Newest first, at most 20."
+                    }
+                },
+                "required": [
+                    "canPurchase",
+                    "limits",
+                    "notices",
+                    "offers",
+                    "plan",
+                    "source"
+                ]
+            },
+            "UploadChatAttachmentInputPayload": {
+                "type": "string",
+                "description": "The file, 1 byte to 5 MiB.",
+                "format": "byte"
+            },
+            "UploadChatAttachmentResponseContent": {
+                "type": "object",
+                "properties": {
+                    "attachment": {
+                        "$ref": "#/components/schemas/ChatAttachment"
+                    }
+                },
+                "required": [
+                    "attachment"
                 ]
             },
             "UserDemographics": {

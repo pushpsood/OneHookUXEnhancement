@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { ContainerClient } from '@azure/storage-blob';
-import type { ChatSessionTierPolicy } from './contextConfig';
+import type { ChatSessionPlanPolicy } from './contextConfig';
 
 import type {
+  AttachmentKind,
+  AttachmentSource,
+  ChatAttachmentRef,
   ChatSessionDetail,
   ChatSessionMessage as WireChatSessionMessage,
   ChatSessionSummary,
@@ -11,13 +14,54 @@ import type {
 
 /** Every `Mood` of the model; a stored mood outside it is dropped when read. */
 const MOODS: ReadonlySet<string> = new Set<Mood>(['Happy', 'Neutral', 'Thinking', 'Sad', 'Excited']);
+const ATTACHMENT_KINDS: ReadonlySet<string> = new Set<AttachmentKind>(['image', 'document', 'text', 'audio', 'video']);
+const ATTACHMENT_SOURCES: ReadonlySet<string> = new Set<AttachmentSource>(['upload', 'match_chat']);
+
+function parseAttachmentRefs(value: unknown): StoredAttachmentRef[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 3) throw new Error('Invalid session attachments');
+  return value.map((candidate): StoredAttachmentRef => {
+    if (!isRecord(candidate)
+      || typeof candidate.name !== 'string' || candidate.name.length < 1 || candidate.name.length > 255
+      || typeof candidate.kind !== 'string' || !ATTACHMENT_KINDS.has(candidate.kind)
+      || typeof candidate.source !== 'string' || !ATTACHMENT_SOURCES.has(candidate.source)
+      || (candidate.attachmentId !== undefined && (typeof candidate.attachmentId !== 'string' || !isUuid(candidate.attachmentId)))
+      || (candidate.sizeBytes !== undefined && !Number.isSafeInteger(candidate.sizeBytes))
+      || (candidate.excerpt !== undefined && (typeof candidate.excerpt !== 'string' || candidate.excerpt.length > 4000))) {
+      throw new Error('Invalid session attachment');
+    }
+    return {
+      name: candidate.name,
+      kind: candidate.kind as AttachmentKind,
+      source: candidate.source as AttachmentSource,
+      ...(typeof candidate.attachmentId === 'string' ? { attachmentId: candidate.attachmentId } : {}),
+      ...(typeof candidate.sizeBytes === 'number' ? { sizeBytes: candidate.sizeBytes } : {}),
+      ...(typeof candidate.excerpt === 'string' ? { excerpt: candidate.excerpt } : {}),
+    };
+  });
+}
+
+/** The ids of the member's own uploads kept with a session (deleted with it). */
+export function sessionAttachmentIds(session: ChatSession): string[] {
+  return session.messages.flatMap((m) => (m.attachments ?? []).flatMap((a) => (a.attachmentId ? [a.attachmentId] : [])));
+}
 
 // The stored session is the API's `ChatSessionDetail` plus storage-only fields; the summary is the
 // API's `ChatSessionSummary` (mr-onehook.smithy).
 export type { ChatSessionSummary };
 
+/**
+ * A file sent with a stored user turn: the API's `ChatAttachmentRef` plus, for the member's own uploads, a
+ * short excerpt of its extracted content so later turns still know what it said. Match-chat files have
+ * neither an id nor an excerpt: their content is never stored.
+ */
+export type StoredAttachmentRef = ChatAttachmentRef & { excerpt?: string };
+
 /** A stored turn: the API's `ChatSessionMessage` plus the exchange it belongs to (idempotency). */
-export type ChatSessionMessage = WireChatSessionMessage & { exchangeId: string };
+export type ChatSessionMessage = Omit<WireChatSessionMessage, 'attachments'> & {
+  exchangeId: string;
+  attachments?: StoredAttachmentRef[];
+};
 
 /**
  * A stored session: the API's `ChatSessionDetail` with stored turns. `scope` and `messageCount` are not
@@ -101,12 +145,14 @@ function parseSession(value: unknown): ChatSession {
     const mood = candidate.role === 'assistant' && typeof candidate.mood === 'string' && MOODS.has(candidate.mood)
       ? { mood: candidate.mood as Mood }
       : {};
+    const attachments = candidate.role === 'user' ? parseAttachmentRefs(candidate.attachments) : undefined;
     return {
       role: candidate.role,
       content: candidate.content,
       createdAt: new Date(candidate.createdAt).toISOString(),
       exchangeId: candidate.exchangeId,
       ...mood,
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
     };
   });
   return {
@@ -159,8 +205,19 @@ function parseSessionQuotaIndex(value: unknown): SessionQuotaIndex {
   return { schemaVersion: 1, userRef: value.userRef, sessions };
 }
 
+export interface ChatSessionStoreOptions {
+  /** Called with the member's uploaded files of a session that is deleted or expires (best effort). */
+  onSessionDeleted?: (subject: string, attachmentIds: string[]) => Promise<void>;
+}
+
 export class PlaintextChatSessionStore {
-  constructor(private readonly container: ContainerClient) {}
+  constructor(private readonly container: ContainerClient, private readonly options: ChatSessionStoreOptions = {}) {}
+
+  private async sessionDeleted(subject: string, session: ChatSession): Promise<void> {
+    const ids = sessionAttachmentIds(session);
+    if (ids.length === 0 || !this.options.onSessionDeleted) return;
+    await this.options.onSessionDeleted(subject, ids).catch(() => undefined);
+  }
 
   private sessionBlobName(subject: string, sessionId: string): string {
     if (!isUuid(sessionId)) throw new ChatSessionAccessError('Invalid session ID');
@@ -245,6 +302,7 @@ export class PlaintextChatSessionStore {
       throw new ChatSessionAccessError('Session binding mismatch');
     }
     if (Date.parse(record.session.expiresAt) <= Date.now()) {
+      await this.sessionDeleted(subject, record.session);
       await blob.deleteIfExists();
       return undefined;
     }
@@ -267,6 +325,7 @@ export class PlaintextChatSessionStore {
         throw new ChatSessionAccessError('Session binding mismatch');
       }
       if (Date.parse(record.session.expiresAt) <= Date.now()) {
+        await this.sessionDeleted(subject, record.session);
         await blob.deleteIfExists().catch(() => undefined);
         continue;
       }
@@ -292,7 +351,13 @@ export class PlaintextChatSessionStore {
     return (await this.readExisting(subject, sessionId))?.record.session;
   }
 
+  /** Deletes the session, its uploaded files and its index entry. Idempotent. */
   async delete(subject: string, sessionId: string): Promise<void> {
+    const existing = await this.readExisting(subject, sessionId).catch((error: unknown) => {
+      if (error instanceof ChatSessionAccessError) throw error;
+      return undefined;
+    });
+    if (existing) await this.sessionDeleted(subject, existing.record.session);
     await this.container.getBlockBlobClient(this.sessionBlobName(subject, sessionId)).deleteIfExists();
     await this.releaseSession(subject, sessionId);
   }
@@ -337,7 +402,9 @@ export class PlaintextChatSessionStore {
     assistantMessage: string;
     /** The mood of the assistant turn, stored with it so a reopened session shows it. */
     assistantMood?: Mood;
-    policy: ChatSessionTierPolicy;
+    /** Files sent with the user turn. */
+    userAttachments?: StoredAttachmentRef[];
+    policy: ChatSessionPlanPolicy;
   }): Promise<ChatSession> {
     const sessionId = input.sessionId ?? input.exchangeId;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -359,9 +426,15 @@ export class PlaintextChatSessionStore {
         await this.reserveSession(input.subject, sessionId, expiresAt, input.policy.maxSessions);
         reservationUpdated = true;
         const effectiveMaxMessages = input.policy.maxMessages - (input.policy.maxMessages % 2);
-        const messages = [
+        const messages: ChatSessionMessage[] = [
           ...(existing?.record.session.messages ?? []),
-          { role: 'user' as const, content: input.userMessage, createdAt: now, exchangeId: input.exchangeId },
+          {
+            role: 'user' as const,
+            content: input.userMessage,
+            createdAt: now,
+            exchangeId: input.exchangeId,
+            ...(input.userAttachments && input.userAttachments.length > 0 ? { attachments: input.userAttachments } : {}),
+          },
           {
             role: 'assistant' as const,
             content: input.assistantMessage,
@@ -369,7 +442,10 @@ export class PlaintextChatSessionStore {
             exchangeId: input.exchangeId,
             ...(input.assistantMood ? { mood: input.assistantMood } : {}),
           },
-        ].slice(-effectiveMaxMessages);
+        ];
+        // Turns that fall out of the window take their uploaded files with them (after the write below).
+        const dropped = messages.slice(0, Math.max(0, messages.length - effectiveMaxMessages));
+        messages.splice(0, dropped.length);
         const session: ChatSession = {
           sessionId,
           ...(input.matchId ? { matchId: input.matchId } : {}),
@@ -394,6 +470,7 @@ export class PlaintextChatSessionStore {
             conditions: existing?.etag ? { ifMatch: existing.etag } : { ifNoneMatch: '*' },
           },
         );
+        if (dropped.length > 0) await this.sessionDeleted(input.subject, { ...session, messages: dropped });
         return session;
       } catch (error: unknown) {
         const status = typeof error === 'object' && error !== null && 'statusCode' in error

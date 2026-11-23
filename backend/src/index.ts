@@ -22,6 +22,16 @@ import {
   createUserDataEraser,
   loadUxErasureConfig,
 } from './uxErasureWorker';
+import { AzureProTable, ProStore } from './proStore';
+import { ProSubscriptionService } from './proSubscriptionService';
+import { FakeProPaymentProvider } from './proPayments';
+import { unavailableMembershipDirectory } from './membershipDirectory';
+import { StateMembershipClient } from './stateMembershipClient';
+import { ProHandoverWorker, ProRenewalScheduler } from './proHandoverWorker';
+import { AttachmentStore } from './attachmentStore';
+import { AttachmentProcessingQueue, AttachmentProcessor, FfmpegFrameExtractor } from './attachmentProcessor';
+import { AttachmentUsageLedger } from './attachmentUsage';
+import { AzureDocumentReader, AzureTranscriber, AzureVisionReader } from './attachmentAi';
 
 const credential = new DefaultAzureCredential();
 
@@ -88,10 +98,45 @@ const chatQuota = contextualConfig.chatQuotaTableName && storageAccountName
       `https://${storageAccountName}.table.core.windows.net`, contextualConfig.chatQuotaTableName, credential))
   : undefined;
 
+// Mr OneHook Pro: subscriptions, ledger, notices and the attachment allowance (one Azure Table). Built
+// whenever the table is configured, so existing subscriptions are honoured even while purchases are off.
+const proStore = contextualConfig.pro.tableName && storageAccountName
+  ? new ProStore(new AzureProTable(new TableClient(
+      `https://${storageAccountName}.table.core.windows.net`, contextualConfig.pro.tableName, credential)))
+  : undefined;
+if (contextualConfig.pro.missing.length > 0) console.warn('[WARN] Mr OneHook Pro:', contextualConfig.pro.missing.join(', '));
+// The fake provider moves no money (config refuses it in prod). No real provider is wired yet.
+const paymentProvider = contextualConfig.pro.paymentProvider === 'fake' ? new FakeProPaymentProvider() : undefined;
+// What Mr OneHook Pro reads from State (IAM-only, SigV4 with the federated role). Without a State URL every
+// renewal, refund, kept-Pro and handover waits (fails closed) instead of guessing.
+const membershipDirectory = contextualConfig.oneHookDataApiUrl
+  ? new StateMembershipClient(
+      contextualConfig.oneHookDataApiUrl,
+      new SigV4RequestSigner(contextualConfig.oneHookDataApiAwsRegion, contextualConfig.oneHookDataApiAwsService, awsCredentials),
+      contextualConfig.dataApiTimeoutMs,
+    )
+  : unavailableMembershipDirectory;
+const proService = proStore
+  ? new ProSubscriptionService({
+      store: proStore,
+      ...(paymentProvider ? { provider: paymentProvider } : {}),
+      directory: membershipDirectory,
+      includedTiers: contextualConfig.pro.includedTiers,
+      prices: contextualConfig.pro.prices,
+      currency: contextualConfig.pro.currency,
+    })
+  : undefined;
+
 let contextualServices: ContextualServices | undefined;
 if (contextualConfig.ready && blobServiceClient) {
   const sessionContainer = blobServiceClient.getContainerClient(contextualConfig.sessionContainerName);
-  const sessionStore = new PlaintextChatSessionStore(sessionContainer);
+  const attachmentStore = new AttachmentStore(sessionContainer);
+  // A deleted or expired session takes the files sent in it along.
+  const sessionStore = new PlaintextChatSessionStore(sessionContainer, {
+    onSessionDeleted: async (subject, ids) => {
+      for (const id of ids) await attachmentStore.delete(subject, id);
+    },
+  });
   if (contextualConfig.sessionStorageEnabled && !contextualConfig.sessionStorageReady) {
     console.warn('[WARN] Chat session storage is enabled but unavailable:', contextualConfig.sessionMissing.join(', '));
   }
@@ -116,10 +161,41 @@ if (contextualConfig.ready && blobServiceClient) {
   // Free-tier daily message counters (Azure Table Storage, managed identity). Missing config means free
   // members get 503 (never unlimited); paid members are unaffected.
   if (!chatQuota) console.warn('[WARN] AZURE_CHAT_QUOTA_TABLE is not set; free members cannot chat');
+  // Attachments: vision (the chat deployment, image input), transcription and Document Intelligence.
+  let attachments: ContextualServices['attachments'];
+  const attachmentConfig = contextualConfig.attachments;
+  if (attachmentConfig.missing.length > 0) console.warn('[WARN] Chat attachments are off:', attachmentConfig.missing.join(', '));
+  if (attachmentConfig.ready && proStore) {
+    const visionClient = new AzureOpenAI({
+      endpoint, azureADTokenProvider, deployment: attachmentConfig.visionDeployment,
+      apiVersion: process.env.AZURE_OPENAI_VISION_API_VERSION?.trim() || '2024-10-21',
+    });
+    const transcriber = attachmentConfig.transcriptionDeployment && attachmentConfig.transcriptionEndpoint
+      ? new AzureTranscriber(new AzureOpenAI({
+          endpoint: attachmentConfig.transcriptionEndpoint, azureADTokenProvider, deployment: attachmentConfig.transcriptionDeployment,
+          apiVersion: process.env.AZURE_OPENAI_TRANSCRIPTION_API_VERSION?.trim() || '2025-04-01-preview',
+        }), attachmentConfig.transcriptionDeployment)
+      : undefined;
+    if (!transcriber) console.warn('[WARN] Audio and video attachments are off (needs AZURE_OPENAI_TRANSCRIPTION_DEPLOYMENT)');
+    const documents = attachmentConfig.documentIntelligenceEndpoint
+      ? new AzureDocumentReader(attachmentConfig.documentIntelligenceEndpoint, credential)
+      : undefined;
+    if (!documents) console.warn('[WARN] PDF and Office attachments are off (needs AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT)');
+    const processor = new AttachmentProcessor({
+      vision: new AzureVisionReader(visionClient, attachmentConfig.visionDeployment),
+      ...(transcriber ? { transcriber } : {}),
+      ...(documents ? { documents } : {}),
+      ...(attachmentConfig.ffmpegPath ? { frames: new FfmpegFrameExtractor(attachmentConfig.ffmpegPath) } : {}),
+    }, attachmentConfig.rates, attachmentConfig.maxDocumentPages);
+    const usage = new AttachmentUsageLedger(proStore, attachmentConfig);
+    attachments = { store: attachmentStore, processor, usage, queue: new AttachmentProcessingQueue(attachmentStore, processor, usage) };
+  }
   contextualServices = {
     client,
     deployment,
     dataClient,
+    ...(proService ? { pro: proService } : {}),
+    ...(attachments ? { attachments } : {}),
     ...(chatQuota ? { chatQuota } : {}),
     ...(suggestionsEnabled
       ? {
@@ -167,10 +243,33 @@ if (erasureConfig.problems.length > 0) {
       eraser: createUserDataEraser(
         new PlaintextChatSessionStore(blobServiceClient.getContainerClient(contextualConfig.sessionContainerName)),
         chatQuota,
+        {
+          attachments: new AttachmentStore(blobServiceClient.getContainerClient(contextualConfig.sessionContainerName)),
+          ...(proService ? { pro: proService } : {}),
+        },
       ),
       concurrency: erasureConfig.concurrency,
     });
     erasureWorker.start();
+  }
+}
+
+// Mr OneHook Pro background work: the renewal/refund job (every instance; due rows are leased) and the
+// membership's Pro handover events. Both need State (fail closed until its operations exist).
+let renewalScheduler: ProRenewalScheduler | undefined;
+let handoverWorker: ProHandoverWorker | undefined;
+if (proService && contextualConfig.ready) {
+  renewalScheduler = new ProRenewalScheduler(proService, contextualConfig.pro.renewalIntervalMs);
+  renewalScheduler.start();
+  const handoverQueue = loadUxErasureConfig({ UX_ERASURE_QUEUE_URL: contextualConfig.pro.entitlementQueueUrl });
+  if (handoverQueue.problems.length > 0) {
+    console.warn('[WARN] Mr OneHook Pro handover worker is off: MR_ONEHOOK_ENTITLEMENT_QUEUE_URL is not an SQS queue URL');
+  } else if (handoverQueue.configured) {
+    handoverWorker = new ProHandoverWorker(
+      new SqsErasureQueue(new SQSClient({ region: handoverQueue.region, credentials: awsCredentials }), handoverQueue.queueUrl),
+      proService,
+    );
+    handoverWorker.start();
   }
 }
 
@@ -234,7 +333,7 @@ async function shutdown(signal: string): Promise<void> {
   shuttingDown = true;
   console.info(`Received ${signal}; shutting down`);
   setTimeout(() => process.exit(0), 40_000).unref();
-  await erasureWorker?.stop(30_000);
+  await Promise.all([erasureWorker?.stop(30_000), handoverWorker?.stop(30_000), renewalScheduler?.stop()]);
   server.close(() => process.exit(0));
 }
 process.on('SIGTERM', () => { void shutdown('SIGTERM'); });

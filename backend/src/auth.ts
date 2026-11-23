@@ -1,7 +1,12 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import type { NextFunction, Request, Response } from 'express';
 import type { SubscriptionTier } from 'onehook-api-client';
-import { onUnknownSubscriptionTier, resolveSubscriptionTier } from 'onehook-api-client/membership';
+import {
+  DEFAULT_SUBSCRIPTION_TIER,
+  onUnknownSubscriptionTier,
+  resolveSubscriptionTier,
+  subscriptionTierRank,
+} from 'onehook-api-client/membership';
 import { normalizeTier, type ContextualFeatureConfig } from './contextConfig';
 import type { AuthenticatedPrincipal } from './contextTypes';
 
@@ -28,32 +33,28 @@ export function extractPermissions(payload: JWTPayload): Set<string> {
   return permissions;
 }
 
-// A verified token carrying a tier that is not Must / Super / Infinity is treated as Must (no persisted
-// AI session) and logged as an error so a developer investigates where the value came from.
+// A verified token carrying a tier that is not Must / Super / Infinity is treated as Must (the Free plan)
+// and logged as an error so a developer investigates where the value came from.
 onUnknownSubscriptionTier((raw) => {
   console.error(new Error(`UnknownSubscriptionTier: token tier '${raw.slice(0, 64)}' treated as Must`));
 });
 
-export function resolveSessionTier(
-  payload: JWTPayload,
-  claimName: string,
-  configuredTiers: Readonly<Partial<Record<SubscriptionTier, unknown>>>,
-): SubscriptionTier | undefined {
+/**
+ * The member's membership tier from the verified token. A single tier claim (`custom:subscriptionTier`)
+ * goes through the SDK resolver (missing = Must, unknown = Must and reported). A group list
+ * (`cognito:groups`) takes the highest tier among the groups that are tiers; other groups are normal and
+ * skipped silently. Anything else is Must.
+ */
+export function resolveMembershipTier(payload: JWTPayload, claimName: string): SubscriptionTier {
   const claim = payload[claimName];
-  if (typeof claim === 'string') {
-    // A single tier claim (custom:subscriptionTier): unknown → Must (reported), which has no policy.
-    const tier = resolveSubscriptionTier(claim);
-    return Object.prototype.hasOwnProperty.call(configuredTiers, tier) ? tier : undefined;
-  }
-  // A group list (cognito:groups): non-tier groups are normal, so they are skipped silently.
+  if (typeof claim === 'string' || claim === undefined) return resolveSubscriptionTier(claim);
   const candidates = Array.isArray(claim) ? claim.filter((value): value is string => typeof value === 'string') : [];
+  let best: SubscriptionTier | undefined;
   for (const candidate of candidates) {
     const tier = normalizeTier(candidate);
-    if (tier && Object.prototype.hasOwnProperty.call(configuredTiers, tier)) {
-      return tier;
-    }
+    if (tier && (!best || subscriptionTierRank(tier) > subscriptionTierRank(best))) best = tier;
   }
-  return undefined;
+  return best ?? DEFAULT_SUBSCRIPTION_TIER;
 }
 
 export function createJwtAuthenticator(config: ContextualFeatureConfig, audience = config.authAudience) {
@@ -77,13 +78,10 @@ export function createJwtAuthenticator(config: ContextualFeatureConfig, audience
       if (typeof payload.sub !== 'string' || payload.sub.length === 0 || payload.sub.length > 256) {
         throw new Error('Missing stable subject');
       }
-      const tier = resolveSessionTier(payload, config.sessionTierClaim, config.sessionTierPolicies);
-      const rawTier = payload[config.sessionTierClaim];
       req.auth = {
         subject: payload.sub,
-        membership: resolveSubscriptionTier(typeof rawTier === 'string' ? rawTier : undefined),
+        membership: resolveMembershipTier(payload, config.sessionTierClaim),
         permissions: extractPermissions(payload),
-        ...(tier ? { tier } : {}),
       };
       next();
     } catch {

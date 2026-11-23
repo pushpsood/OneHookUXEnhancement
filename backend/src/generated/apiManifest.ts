@@ -124,6 +124,8 @@ export const API_OPERATIONS: readonly ApiOperation[] = [
   { operationId: "ListMatchingOnMembers", method: "GET", path: "/state/internal/matching/members", service: "state", auth: "iam" },
   { operationId: "GetDiscoverySnapshot", method: "GET", path: "/state/internal/users/{targetUserId}/discovery-snapshot", service: "state", auth: "iam" },
   { operationId: "GetInternalMatchingStatus", method: "GET", path: "/state/internal/users/{targetUserId}/matching", service: "state", auth: "iam" },
+  { operationId: "GetInternalMembership", method: "GET", path: "/state/internal/users/{targetUserId}/membership", service: "state", auth: "iam" },
+  { operationId: "ConfirmMrOneHookProHandover", method: "POST", path: "/state/internal/users/{targetUserId}/mr-onehook-pro-handovers/{activationId}/confirmation", service: "state", auth: "iam" },
   { operationId: "GetMatch", method: "GET", path: "/state/match/{matchId}", service: "state", auth: "cognito" },
   { operationId: "DisableMatching", method: "POST", path: "/state/matching/disable", service: "state", auth: "cognito" },
   { operationId: "EnableMatching", method: "POST", path: "/state/matching/enable", service: "state", auth: "cognito" },

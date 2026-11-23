@@ -19,6 +19,14 @@ output "session_storage_container_name" {
   value = azurerm_storage_container.session_container.name
 }
 
+output "pro_table_name" {
+  value = azapi_resource.pro_table.name
+}
+
+output "document_intelligence_endpoint" {
+  value = local.document_intelligence_endpoint
+}
+
 
 output "stage" {
   value = var.stage

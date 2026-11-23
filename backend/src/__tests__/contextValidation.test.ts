@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractPermissions, resolveSessionTier } from '../auth';
+import { extractPermissions, resolveMembershipTier } from '../auth';
 import { SubscriptionTier } from 'onehook-api-client';
 import { SUBSCRIPTION_TIERS, parseSubscriptionTier } from 'onehook-api-client/membership';
 import { loadContextualFeatureConfig, normalizeTier } from '../contextConfig';
@@ -75,6 +75,7 @@ test('contextual request accepts only bounded server-resolved identifiers and cu
     includeProfile: false,
     includeMessageHistory: true,
     persistSession: false,
+    attachmentIds: [],
   });
   assert.throws(() => parseContextualChatInput({ matchId: 'match-1', message: 'x'.repeat(101) }, 100));
 });
@@ -96,7 +97,7 @@ test('symmetric JWT algorithms are rejected', () => {
   assert.deepEqual(config.authAlgorithms, ['RS256']);
 });
 
-test('session storage becomes ready only with a valid bounded tier policy', () => {
+test('session storage becomes ready only with a valid bounded plan policy', () => {
   const base = {
     CONTEXTUAL_AI_ENABLED: 'true',
     AUTH_ISSUER: 'https://issuer.example',
@@ -109,78 +110,78 @@ test('session storage becomes ready only with a valid bounded tier policy', () =
     AZURE_SESSION_CONTAINER: 'aisessions',
     CHAT_SESSION_STORAGE_ENABLED: 'true',
   };
+  // Keys are plans (any case); disabled or out-of-bounds policies are dropped.
   const valid = loadContextualFeatureConfig({
     ...base,
-    // Keys may be SDK wire values OR display names — both normalize to the onehook-api-client
-    // SubscriptionTier wire value. Super + Infinity get AI sessions; Must
-    // is disabled, matching the membership matrix.
-    CHAT_SESSION_TIER_POLICIES: JSON.stringify({
-      Super: { enabled: true, maxSessions: 10, maxMessages: 50, retentionDays: 30 },
-      INFINITY: { enabled: true, maxSessions: 25, maxMessages: 50, retentionDays: 30 },
-      Must: { enabled: false, maxSessions: 1, maxMessages: 2, retentionDays: 1 },
+    CHAT_SESSION_PLAN_POLICIES: JSON.stringify({
+      Free: { enabled: true, maxSessions: 1, maxMessages: 50, retentionDays: 30 },
+      PRO: { enabled: true, maxSessions: 3, maxMessages: 50, retentionDays: 30 },
+      super: { enabled: true, maxSessions: 3, maxMessages: 50, retentionDays: 30 },
     }),
   });
   assert.equal(valid.sessionStorageReady, true);
-  assert.deepEqual(valid.sessionTierPolicies, {
-    [SubscriptionTier.SUPER]: { maxSessions: 10, maxMessages: 50, retentionDays: 30 },
-    [SubscriptionTier.INFINITY]: { maxSessions: 25, maxMessages: 50, retentionDays: 30 },
+  assert.deepEqual(valid.sessionPlanPolicies, {
+    FREE: { maxSessions: 1, maxMessages: 50, retentionDays: 30 },
+    PRO: { maxSessions: 3, maxMessages: 50, retentionDays: 30 },
   });
 
-  const invalid = loadContextualFeatureConfig({
-    ...base,
-    CHAT_SESSION_TIER_POLICIES: '{bad-json',
-  });
+  const invalid = loadContextualFeatureConfig({ ...base, CHAT_SESSION_PLAN_POLICIES: '{bad-json' });
   assert.equal(invalid.ready, true, 'ordinary contextual chat remains available');
   assert.equal(invalid.sessionStorageReady, false);
-  assert.ok(invalid.sessionMissing.includes('CHAT_SESSION_TIER_POLICIES'));
+  assert.ok(invalid.sessionMissing.includes('CHAT_SESSION_PLAN_POLICIES'));
 
-  // A policy whose only key is an unrecognised tier (e.g. the old `premium`) normalizes to nothing,
-  // so session storage is NOT ready — this is the exact mismatch that previously broke gating.
-  const stale = loadContextualFeatureConfig({
-    ...base,
-    CHAT_SESSION_TIER_POLICIES: JSON.stringify({
-      premium: { enabled: true, maxSessions: 10, maxMessages: 50, retentionDays: 30 },
-    }),
-  });
-  assert.deepEqual(stale.sessionTierPolicies, {});
-  assert.equal(stale.sessionStorageReady, false);
+  // The old per-tier variable configures nothing any more: a stale deployment is not silently "ready".
+  const original = console.warn;
+  console.warn = () => {};
+  try {
+    const stale = loadContextualFeatureConfig({
+      ...base,
+      CHAT_SESSION_TIER_POLICIES: JSON.stringify({ super: { enabled: true, maxSessions: 3, maxMessages: 50, retentionDays: 30 } }),
+    });
+    assert.deepEqual(stale.sessionPlanPolicies, {});
+    assert.equal(stale.sessionStorageReady, false);
+  } finally {
+    console.warn = original;
+  }
 });
 
-test('tier resolution maps SDK wire values and display names to the SubscriptionTier policy key', () => {
-  // Policies keyed by SDK wire tiers (what the Terraform default `super`/`infinity` normalizes to).
-  const tiers = { [SubscriptionTier.SUPER]: {}, [SubscriptionTier.INFINITY]: {} };
+test('membership tier: a single claim goes through the SDK; a group list takes the highest tier', () => {
   const claim = 'custom:subscriptionTier';
   for (const info of SUBSCRIPTION_TIERS) {
-    const expected = info.wire in tiers ? info.wire : undefined;
-    // The real Cognito attribute carries the WIRE value; a stale client may carry the display name.
-    assert.equal(resolveSessionTier({ [claim]: info.wire }, claim, tiers), expected, info.wire);
-    assert.equal(resolveSessionTier({ [claim]: ` ${info.displayName.toLowerCase()} ` }, claim, tiers), expected, info.displayName);
+    assert.equal(resolveMembershipTier({ [claim]: info.wire }, claim), info.wire, info.wire);
+    assert.equal(resolveMembershipTier({ [claim]: ` ${info.displayName.toLowerCase()} ` }, claim), info.wire, info.displayName);
   }
-});
-
-test('unknown tier names never resolve, whatever the claim shape', () => {
-  const tiers = { [SubscriptionTier.SUPER]: {}, [SubscriptionTier.INFINITY]: {} };
-  for (const unknown of ['NOT_A_TIER', 'staff']) {
-    assert.equal(resolveSessionTier({ 'custom:tier': unknown }, 'custom:tier', tiers), undefined, unknown);
-  }
-  assert.equal(resolveSessionTier({ 'cognito:groups': ['staff', 'SUPER'] }, 'cognito:groups', tiers), SubscriptionTier.SUPER);
-  assert.equal(resolveSessionTier({ 'custom:tier': { value: 'SUPER' } }, 'custom:tier', tiers), undefined);
+  assert.equal(resolveMembershipTier({}, claim), SubscriptionTier.MUST, 'missing: Must');
+  assert.equal(resolveMembershipTier({ 'cognito:groups': ['staff', 'SUPER', 'INFINITY'] }, 'cognito:groups'), SubscriptionTier.INFINITY);
+  assert.equal(resolveMembershipTier({ 'cognito:groups': ['staff'] }, 'cognito:groups'), SubscriptionTier.MUST);
+  assert.equal(resolveMembershipTier({ [claim]: { value: 'SUPER' } }, claim), SubscriptionTier.MUST);
 });
 
 test('an unknown single tier claim is treated as Must and logged as an error', () => {
-  const tiers = { [SubscriptionTier.SUPER]: {}, [SubscriptionTier.INFINITY]: {} };
   const original = console.error;
   const logged: unknown[] = [];
   console.error = (e: unknown) => { logged.push(e); };
   try {
-    assert.equal(resolveSessionTier({ 'custom:subscriptionTier': 'NOT_A_TIER' }, 'custom:subscriptionTier', tiers), undefined);
-    assert.equal(resolveSessionTier({}, 'custom:subscriptionTier', tiers), undefined); // missing: silent
-    assert.equal(resolveSessionTier({ 'cognito:groups': ['staff'] }, 'cognito:groups', tiers), undefined); // groups: silent
+    assert.equal(resolveMembershipTier({ 'custom:subscriptionTier': 'NOT_A_TIER' }, 'custom:subscriptionTier'), SubscriptionTier.MUST);
+    assert.equal(resolveMembershipTier({}, 'custom:subscriptionTier'), SubscriptionTier.MUST); // missing: silent
+    assert.equal(resolveMembershipTier({ 'cognito:groups': ['staff'] }, 'cognito:groups'), SubscriptionTier.MUST); // groups: silent
   } finally {
     console.error = original;
   }
   assert.equal(logged.length, 1);
   assert.match(String(logged[0]), /UnknownSubscriptionTier: token tier 'NOT_A_TIER' treated as Must/);
+});
+
+test('Pro config: included tiers come from config, prices default to Rs 799 / Rs 5,999, the fake provider is refused in prod', () => {
+  const pro = (extra: Record<string, string>) => loadContextualFeatureConfig({ MR_ONEHOOK_PRO_ENABLED: 'true', ...extra } as NodeJS.ProcessEnv).pro;
+  assert.deepEqual(pro({ MR_ONEHOOK_PRO_INCLUDED_TIERS: 'infinity, not-a-tier' }).includedTiers, [SubscriptionTier.INFINITY]);
+  assert.deepEqual(pro({}).prices, { MONTHLY: 79_900, YEARLY: 599_900 });
+  assert.deepEqual(pro({ MR_ONEHOOK_PRO_PRICES: '{"monthly":69900,"yearly":-1}' }).prices, { MONTHLY: 69_900, YEARLY: 599_900 });
+  assert.equal(pro({ MR_ONEHOOK_PRO_PAYMENT_PROVIDER: 'fake', ONEHOOK_STAGE: 'gamma' }).paymentProvider, 'fake');
+  const prod = pro({ MR_ONEHOOK_PRO_PAYMENT_PROVIDER: 'fake', ONEHOOK_STAGE: 'prod' });
+  assert.equal(prod.paymentProvider, 'none');
+  assert.ok(prod.missing.some((m) => m.includes('refused')));
+  assert.equal(pro({ MR_ONEHOOK_PRO_PAYMENT_PROVIDER: 'fake' }).paymentProvider, 'none', 'no stage: refused');
 });
 
 test('normalizeTier is exactly the onehook-api-client parser', () => {
@@ -228,6 +229,7 @@ test('member product-only requests omit match context cleanly', () => {
     includeProfile: true,
     includeMessageHistory: true,
     persistSession: false,
+    attachmentIds: [],
   });
   assert.equal('matchId' in input, false);
   assert.throws(() => parseContextualChatInput({ message: 'hello', matchId: '' }, 100));
