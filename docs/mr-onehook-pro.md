@@ -230,9 +230,45 @@ Still outside these repos: the Payments producer of `SubscriptionChanged`. It mu
   types, the allowance, extraction, storage and the match-chat flow (`attachments.test.ts`); the handover
   worker; plan-based sessions; and the contract test, in which every declared response of every operation
   is produced and checked against the model.
+- `videoFrames.test.ts` runs the bundled ffmpeg on real mp4, mov and webm clips it makes itself, and checks
+  the lock-down: a playlist posing as a video is refused, a wrong forced format fails, a slow ffmpeg is
+  killed, and no environment variable reaches it.
 - `npm run test:e2e` runs the whole journey through the HTTP app on Azurite, which gives real conditional
   blob writes, Table ETags and cross-partition queries. A Super member on Free buys Pro, double taps
   charge once, three sessions with LRU eviction, files are read, kept with the session and deleted with it,
   the membership handover stops renewals, "Keep Pro" with an early end gets a free period and then one
   yearly charge, a membership member gets the overuse refusal, the homepage chat refuses files, and account
-  erasure runs. CI runs both before every deploy.
+  erasure runs. CI runs both before every deploy. The e2e test waits for the processing queue instead of
+  polling file status, so a slow runner cannot hit the status route's 60-per-minute limit.
+
+## Trying video keyframes in gamma
+
+Keyframes need no setting: every video a Pro member sends is also looked at, frame by frame, as long as
+ffmpeg starts on the server. A video with speech is read from both its sound and its frames; a silent video
+is read from its frames alone, which makes it the clearest test.
+
+1. **Optional: check that ffmpeg is there.** Azure Portal, App Service `onehook-chatbot-api` (resource
+   group `onehook-chatbot-rg`), **Log stream** (or `az webapp log tail --resource-group onehook-chatbot-rg
+   --name onehook-chatbot-api`), then restart the app. If the stream says application logging is off, turn
+   on **App Service logs**, **Application logging: File System** first. The line
+   `[WARN] Video frames are off (no ffmpeg)` must NOT appear, and neither must
+   `[WARN] Audio and video attachments are off` (videos also need the transcription deployment, which gamma
+   has). Step 5 is the real test, so this step can be skipped.
+2. **Be Pro on gamma.** Use a member whose membership includes Pro (Infinity), or buy Pro in the app: gamma
+   uses the fake payment provider, so no money moves.
+3. **Make a short test video**, at most 5 MiB, as mp4, mov or webm. A phone clip of 3 to 5 seconds is fine
+   (record at 720p if the phone allows it; 4K is over 5 MiB within a second or two). For the clearest test,
+   record a clip without speaking (a quiet room, or the sound muted in the phone's editor) of something
+   with large writing on it, for example a page with "ONEHOOK TEST 42" written on it.
+4. **Send it.** Open the Mr OneHook chat, tap attach, choose the video, wait for **Ready** (a few seconds),
+   and ask "What is written in this video?" (or send it with no text).
+5. **Read the result.**
+   - Mr OneHook names the writing: keyframes work.
+   - A silent clip shows **Failed**: no frames were read, so check step 1.
+   - A clip with speech answers only from what is said: frames were not read, so check step 1.
+6. **Optional check in the logs.** In the Log stream, `attachment.processed` with `"kind":"video"` and
+   `"status":"READY"` is logged for each video; `costMilli` is higher when frames were described, because
+   the frames go through the vision model.
+
+Each video costs part of the member's monthly processing allowance (frames through vision, plus the
+transcription per minute). A video that fails costs nothing.

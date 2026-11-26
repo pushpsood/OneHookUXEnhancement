@@ -517,7 +517,7 @@ when the variable is absent.
 | `AZURE_PRO_TABLE` | Table for Pro subscriptions, ledger, notices and the attachment allowance | none | `mronehookpro` |
 | `MR_ONEHOOK_PRO_PRICES` | `{"monthly": paise, "yearly": paise}` | Rs 799 / Rs 5,999 | `mr_onehook_pro_prices` |
 | `MR_ONEHOOK_PRO_PAYMENT_PROVIDER` | `none` or `fake` (moves no money; refused in prod) | `none` | gamma `fake`, prod `none` |
-| `MR_ONEHOOK_PRO_RENEWAL_INTERVAL_MS` | How often the renewal job runs (10 s to 1 h) | `300000` | not set |
+| `MR_ONEHOOK_PRO_RENEWAL_INTERVAL_MS` | How often the renewal job runs (10 s to 1 h). It finds due rows through the table's `due:<YYYYMMDDHH>` index, not a full scan | `300000` | not set |
 | `MR_ONEHOOK_ENTITLEMENT_QUEUE_URL` | SQS queue of the membership's Pro handover events; empty keeps the worker off | empty | `mr_onehook_entitlement_queue_url` (empty until OneHookBackend creates it) |
 | `CHAT_ATTACHMENTS_ENABLED` | Pro attachments | `false` | `chat_attachments_enabled` (gamma `true`) |
 | `ATTACHMENT_MONTHLY_BUDGET_MINOR` | `{"subscription": paise, "membership": paise}` of Azure cost per member per month | Rs 400 each | `attachment_monthly_budget_minor` |
@@ -692,7 +692,7 @@ Connection request or local-search retry:
 }
 ```
 
-The caller must not send a user ID, profile, or participant list. Identity comes only from the verified token. `message` is required (at most `CONTEXT_MAX_INPUT_CHARACTERS`); `contextOptions.includeProfile` and `includeMessageHistory` default to `true`. Omit `matchId` for a product-only question; that mode does not call the match/profile API and cannot include `ephemeralMessageContext`. Include `matchId` only when authorized connection context is wanted. The backend validates excerpt speakers (`self` or `match`), timestamps (valid, at most 5 minutes in the future), text, total count and total characters, but treats excerpt content as untrusted conversation data and never writes it to AI sessions, logs, or Blob Storage. `contextRequestId` must be a UUID; the backend does not check it against an earlier response. For connection requests the backend calls:
+The caller must not send a user ID, profile, or participant list. Identity comes only from the verified token. `message` is required (at most `CONTEXT_MAX_INPUT_CHARACTERS`). It may be empty only when `attachmentIds` is present: files sent without text become the turn "Please look at the attached files.", which is also what the saved session shows; `contextOptions.includeProfile` and `includeMessageHistory` default to `true`. Omit `matchId` for a product-only question; that mode does not call the match/profile API and cannot include `ephemeralMessageContext`. Include `matchId` only when authorized connection context is wanted. The backend validates excerpt speakers (`self` or `match`), timestamps (valid, at most 5 minutes in the future), text, total count and total characters, but treats excerpt content as untrusted conversation data and never writes it to AI sessions, logs, or Blob Storage. `contextRequestId` must be a UUID; the backend does not check it against an earlier response. For connection requests the backend calls:
 
 ```http
 GET {ONEHOOK_DATA_API_URL}/api/ai-context/matches/{matchId}
@@ -884,7 +884,7 @@ test job builds the SDK (Java 21) before the backend tests. The only pull-reques
 (see [The Mr OneHook SDK](#the-mr-onehook-sdk-onehook-mr-onehook-client)).
 
 ```
-test-backend: npm ci, npm test (tsc build + node --test)
+test-backend: SDK build + manifest check, npm ci, npm test (tsc build + node --test), npm run test:e2e (Azurite)
     │
     ▼
 deploy-gamma ── deploy-stage.yml with stage=gamma   (skipped for stage=prod)
@@ -942,7 +942,21 @@ az webapp deploy --resource-group <resource group> --name <app name> --src-path 
 ```
 
 `npm start` runs `node dist/index.js`, so the package must contain the built `dist/` directory; App Service
-does not build it (`SCM_DO_BUILD_DURING_DEPLOYMENT=false`).
+does not build it (`SCM_DO_BUILD_DURING_DEPLOYMENT=false`). Build the package on Linux x64 (as CI does):
+`npm ci` downloads the ffmpeg program for the machine it runs on, and a package built on a Mac would carry
+a macOS ffmpeg that cannot run on App Service (videos would then be read from their sound only).
+
+### While prod is not provisioned: deploy gamma only
+
+A push to `main` runs `stage=all`: gamma, then a run that waits at **Approve prod**. Runs are serialized, so
+a run left waiting there blocks every later deploy, including gamma. Until prod exists:
+
+1. Cancel any run waiting at **Approve prod** (GitHub Actions, the run, **Cancel workflow**). Its gamma
+   deploy is already done, and a newer run includes its commits.
+2. Deploy gamma by hand: GitHub Actions, **Deploy UX Enhancement (Infra + Backend)**, **Run workflow**,
+   stage `gamma` (or `gh workflow run deploy.yml --ref main -f stage=gamma`).
+3. A commit that should not start a deploy (for example a test-only change) can carry `[skip ci]` in its
+   message; then run step 2.
 
 ---
 
@@ -1054,7 +1068,7 @@ Terraform uses the AzureRM backend in `infra/main.tf`: resource group `onehook-t
 
 ## Third-party software
 
-- **ffmpeg** (video keyframes) comes from the `ffmpeg-static` package: an unmodified ffmpeg 6.0 build under
+- **ffmpeg** (video keyframes; how to try them: [docs/mr-onehook-pro.md](docs/mr-onehook-pro.md#trying-video-keyframes-in-gamma)) comes from the `ffmpeg-static` package: an unmodified ffmpeg 6.0 build under
   GPL-3.0-or-later (see `node_modules/ffmpeg-static/ffmpeg.LICENSE` and `ffmpeg.README`, which link the source).
   The backend only runs it as a separate program on the server; it is not linked into our code and not
   shipped to members' devices. Changing or redistributing the binary would bring the GPL's source-code duties.
@@ -1136,7 +1150,8 @@ terraform apply -var-file=stages/<stage>.tfvars
 Locally, sign in with `az login`, export `ARM_SUBSCRIPTION_ID`, and add `-backend-config=use_oidc=false`
 to `init` (CI uses GitHub OIDC). The deploy workflow runs gamma, then pauses for a manual approval
 (GitHub environment `prod-approval`, required reviewer) before deploying prod. Approve or reject it from
-the run page in GitHub Actions (**Review deployments**).
+the run page in GitHub Actions (**Review deployments**). Prod is not provisioned yet: deploy gamma only,
+as described in [While prod is not provisioned](#while-prod-is-not-provisioned-deploy-gamma-only).
 
 DNS for both hostnames (CNAME to the Azure host plus the `asuid.` TXT ownership record) lives in Route53
 in the frontend AWS account and is owned by `OneHookClient/infra/stacks/chatbot-dns-stack.ts`
