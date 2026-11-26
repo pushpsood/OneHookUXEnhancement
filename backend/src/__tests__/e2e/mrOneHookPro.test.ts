@@ -148,13 +148,13 @@ test('Mr OneHook Pro: Free -> Pro -> membership -> keep Pro, on real storage', {
     });
     return { status: r.status, body: await r.json() as any };
   };
+  // Waits for this instance's processing queue, then reads the status once. (Polling in a tight loop
+  // could hit the status route's 60-per-minute limit on a slow runner.)
   const waitReady = async (who: string, id: string) => {
-    for (let i = 0; i < 50; i++) {
-      const r = await api(who, 'GET', `/api/member/product-connection-chat/attachments/${id}`);
-      if (r.body.attachment?.status !== 'PROCESSING') return r.body.attachment;
-      await new Promise((ok) => setTimeout(ok, 20));
-    }
-    throw new Error('attachment never finished');
+    await queue.idle();
+    const r = await api(who, 'GET', `/api/member/product-connection-chat/attachments/${id}`);
+    if (!r.body.attachment) throw new Error(`attachment status read failed: ${r.status} ${JSON.stringify(r.body)}`);
+    return r.body.attachment;
   };
   const proView = (who: string) => api(who, 'GET', '/api/member/mr-onehook-pro');
   const blobsOf = async (who: string) => {
