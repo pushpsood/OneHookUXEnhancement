@@ -385,7 +385,11 @@ export interface ProSubscription {
 export type ProSubscriptionStatus = "PENDING" | "SCHEDULED" | "ACTIVE" | "GRACE" | "ENDED";
 
 export interface ProductConnectionChatRequestContent {
-  /** 1 to `CONTEXT_MAX_INPUT_CHARACTERS` (default 4000) characters; trimmed, must not be blank. */
+  /**
+   * Up to `CONTEXT_MAX_INPUT_CHARACTERS` (default 4000) characters; trimmed. Must not be blank unless
+   * `attachmentIds` is present: files sent without text become the turn "Please look at the attached
+   * files." (saved and shown as the user's message).
+   */
   message: string;
   /** Present: a connection chat about this match (1 to 256 characters). Absent: a product chat. */
   matchId?: string;

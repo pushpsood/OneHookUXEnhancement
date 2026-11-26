@@ -92,6 +92,9 @@ export function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+/** The user's turn when files are sent with no text. */
+export const ATTACHMENTS_ONLY_MESSAGE = 'Please look at the attached files.';
+
 export function parseContextualChatInput(
   value: unknown,
   maxCharacters: number,
@@ -101,8 +104,9 @@ export function parseContextualChatInput(
 ): ContextualChatInput {
   if (!isRecord(value)) throw new Error('Invalid request body');
   const matchId = value.matchId === undefined ? undefined : requiredString(value, 'matchId', 256);
-  const message = requiredString(value, 'message', maxCharacters).trim();
-  if (message.length === 0) throw new Error('Invalid message');
+  // Required, but may be empty when files are attached (checked below, once attachmentIds is read).
+  if (typeof value.message !== 'string' || value.message.length > maxCharacters) throw new Error('Invalid message');
+  const typedMessage = value.message.trim();
 
   const options = isRecord(value.contextOptions) ? value.contextOptions : {};
   const includeProfile = options.includeProfile === undefined ? true : options.includeProfile === true;
@@ -181,6 +185,9 @@ export function parseContextualChatInput(
     attachmentIds = [...new Set((value.attachmentIds as string[]).map((id) => id.toLowerCase()))];
     if (attachmentIds.length !== value.attachmentIds.length) throw new Error('Duplicate attachmentIds');
   }
+  // Files may be sent without text: the turn then asks Mr OneHook to look at them (saved and shown as such).
+  if (typedMessage.length === 0 && attachmentIds.length === 0) throw new Error('Invalid message');
+  const message = typedMessage || ATTACHMENTS_ONLY_MESSAGE;
   const persistSession = sessionOptions.persist === true || typeof sessionOptions.sessionId === 'string';
 
   return {

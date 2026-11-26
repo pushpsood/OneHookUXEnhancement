@@ -60,8 +60,6 @@ export interface ProConfig {
   missing: string[];
   /** Azure Table holding Pro subscriptions, ledger, notices and attachment usage. */
   tableName: string;
-  /** Membership tiers that include Pro (verified from the token; no subscription needed, none sold). */
-  includedTiers: SubscriptionTier[];
   /** Price per billing period, in the currency's minor unit (paise). */
   prices: Record<ProBillingPeriod, number>;
   currency: string;
@@ -274,10 +272,6 @@ export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env
   // ── Mr OneHook Pro ──
   const proEnabled = readBoolean(env.MR_ONEHOOK_PRO_ENABLED, false);
   const proTableName = env.AZURE_PRO_TABLE?.trim() ?? '';
-  const includedTiers = (env.MR_ONEHOOK_PRO_INCLUDED_TIERS ?? '')
-    .split(',')
-    .map((value) => normalizeTier(value))
-    .filter((tier): tier is SubscriptionTier => tier !== undefined);
   const rawPrices = parseJsonObject(env.MR_ONEHOOK_PRO_PRICES) ?? {};
   const prices: Record<ProBillingPeriod, number> = {
     MONTHLY: positiveInteger(rawPrices.monthly, DEFAULT_PRO_PRICES.MONTHLY, 10_000_000),
@@ -302,7 +296,6 @@ export function loadContextualFeatureConfig(env: NodeJS.ProcessEnv = process.env
     ready: proEnabled && contextualReady && proTableName.length > 0,
     missing: proMissing,
     tableName: proTableName,
-    includedTiers,
     prices,
     currency: 'INR',
     paymentProvider,

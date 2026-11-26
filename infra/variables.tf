@@ -45,6 +45,17 @@ variable "app_service_plan_name" {
   default     = "onehook-chatbot-asp"
 }
 
+variable "app_service_sku_name" {
+  description = "App Service plan size. B1 (1 core, 1.75 GB) is enough for chat; video attachments run ffmpeg next to the API, so raise it (for example B2) only if CPU or memory alarms show it is needed."
+  type        = string
+  default     = "B1"
+
+  validation {
+    condition     = contains(["B1", "B2", "B3", "S1", "S2", "S3", "P0v3", "P1v3", "P2v3", "P3v3"], var.app_service_sku_name)
+    error_message = "app_service_sku_name must be a Linux App Service plan size: B1, B2, B3, S1, S2, S3, P0v3, P1v3, P2v3 or P3v3."
+  }
+}
+
 variable "app_service_name" {
   description = "The name of the app service"
   type        = string
@@ -280,15 +291,9 @@ variable "chat_session_plan_policies" {
 # ── Mr OneHook Pro ─────────────────────────────────────────────────────────────
 
 variable "mr_onehook_pro_enabled" {
-  description = "Mr OneHook Pro purchase routes (/api/member/mr-onehook-pro). Plans apply regardless: a membership tier in mr_onehook_pro_included_tiers is Pro."
+  description = "Mr OneHook Pro purchase routes (/api/member/mr-onehook-pro). Plans apply regardless: a membership tier that includes Pro (Infinity, from the shared tier catalog in onehook-api-client) is Pro."
   type        = bool
   default     = false
-}
-
-variable "mr_onehook_pro_included_tiers" {
-  description = "Membership tiers (verified Cognito claim) that include Mr OneHook Pro: no subscription needed, none sold."
-  type        = list(string)
-  default     = ["infinity"]
 }
 
 variable "mr_onehook_pro_prices" {

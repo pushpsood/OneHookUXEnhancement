@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -174,27 +175,65 @@ export class AttachmentProcessor {
   }
 }
 
-/** ffmpeg keyframes (6 frames, 512 px wide JPEG), with a time limit. Input goes through a temp file. */
+/** The ffmpeg demuxer for each video type we accept. Anything else is refused before ffmpeg starts. */
+const FFMPEG_DEMUXERS: Readonly<Record<string, string>> = { mp4: 'mov', mov: 'mov', webm: 'matroska' };
+
+/**
+ * The ffmpeg arguments for reading keyframes from an untrusted video. The input format is forced (no
+ * guessing from content), only local files may be opened (no network, no other protocols), and the
+ * output is capped at 6 small JPEG frames. Returns undefined for a type we do not accept.
+ */
+export function ffmpegFrameArgs(input: string, outputPattern: string, extension: string): string[] | undefined {
+  const demuxer = FFMPEG_DEMUXERS[extension];
+  if (!demuxer) return undefined;
+  return [
+    '-hide_banner', '-loglevel', 'error', '-nostdin', '-threads', '1',
+    '-protocol_whitelist', 'file', '-f', demuxer, '-i', input,
+    '-an', '-sn', '-dn', '-vf', 'thumbnail=60,scale=512:-2', '-frames:v', '6', '-fps_mode', 'vfr',
+    '-f', 'image2', '-protocol_whitelist', 'file', outputPattern,
+  ];
+}
+
+/**
+ * ffmpeg keyframes (up to 6 frames, 512 px wide JPEG) in a separate process with a time limit and an empty
+ * environment (no keys or settings reach it). Input goes through a temp folder that is always removed.
+ */
 export class FfmpegFrameExtractor implements FrameExtractor {
   constructor(private readonly ffmpegPath: string, private readonly timeoutMs = 30_000) {}
 
   async frames(bytes: Uint8Array, extension: string): Promise<Uint8Array[]> {
     const dir = await mkdtemp(join(tmpdir(), 'mronehook-frames-'));
     try {
-      const input = join(dir, `input.${extension.replace(/[^a-z0-9]/g, '') || 'mp4'}`);
+      const input = join(dir, `input.${extension}`);
+      const args = ffmpegFrameArgs(input, join(dir, 'frame%02d.jpg'), extension);
+      if (!args) return [];
       await writeFile(input, bytes);
       await new Promise<void>((resolve, reject) => {
-        execFile(this.ffmpegPath, [
-          '-hide_banner', '-loglevel', 'error', '-nostdin', '-i', input,
-          '-vf', 'thumbnail=60,scale=512:-2', '-frames:v', '6', '-vsync', 'vfr', join(dir, 'frame%02d.jpg'),
-        ], { timeout: this.timeoutMs, maxBuffer: 1024 * 1024 }, (error) => (error ? reject(error) : resolve()));
+        execFile(this.ffmpegPath, args, { timeout: this.timeoutMs, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024, env: {}, cwd: dir },
+          (error) => (error ? reject(error) : resolve()));
       });
-      const names = (await readdir(dir)).filter((n) => /^frame\d+\.jpg$/.test(n)).sort();
+      const names = (await readdir(dir)).filter((n) => /^frame\d+\.jpg$/.test(n)).sort().slice(0, 6);
       return Promise.all(names.map(async (n) => new Uint8Array(await readFile(join(dir, n)))));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   }
+}
+
+/** ffmpeg to use: FFMPEG_PATH when set, else the copy bundled with the app (ffmpeg-static), else none. */
+export function resolveFfmpegPath(configured: string, bundled: () => string | null | undefined = loadBundledFfmpeg): string {
+  if (configured) return configured;
+  try {
+    return bundled() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function loadBundledFfmpeg(): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require('ffmpeg-static') as string | null;
+  return path && existsSync(path) ? path : null;
 }
 
 export interface ProcessingLogger {

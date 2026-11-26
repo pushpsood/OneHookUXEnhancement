@@ -20,3 +20,16 @@ test('no production source hardcodes a membership tier name', () => {
   }
   assert.deepEqual(offenders, []);
 });
+
+test('the tiers that include Mr OneHook Pro come from the shared catalog (no setting can add one)', async () => {
+  const { SubscriptionTier } = await import('onehook-api-client');
+  const { resolveEntitlement } = await import('../memberRouting');
+  const { loadContextualFeatureConfig } = await import('../contextConfig');
+  const config = loadContextualFeatureConfig({ MR_ONEHOOK_PRO_INCLUDED_TIERS: 'must,super' } as NodeJS.ProcessEnv);
+  for (const info of SUBSCRIPTION_TIERS) {
+    const plan = (await resolveEntitlement(config, undefined, 'm1', info.wire)).plan;
+    assert.equal(plan, info.includesMrOneHookPro ? 'PRO' : 'FREE', info.wire);
+  }
+  assert.equal((await resolveEntitlement(config, undefined, 'm1', SubscriptionTier.INFINITY)).plan, 'PRO');
+  assert.equal((await resolveEntitlement(config, undefined, 'm1', SubscriptionTier.SUPER)).plan, 'FREE');
+});

@@ -275,7 +275,9 @@ structure ProductConnectionChatRequest {
     @httpHeader("Idempotency-Key")
     idempotencyKey: String,
 
-    /// 1 to `CONTEXT_MAX_INPUT_CHARACTERS` (default 4000) characters; trimmed, must not be blank.
+    /// Up to `CONTEXT_MAX_INPUT_CHARACTERS` (default 4000) characters; trimmed. Must not be blank unless
+    /// `attachmentIds` is present: files sent without text become the turn "Please look at the attached
+    /// files." (saved and shown as the user's message).
     @required
     message: String,
 

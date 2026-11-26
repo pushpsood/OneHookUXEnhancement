@@ -27,7 +27,7 @@ function harness(stateDown: () => boolean) {
   const confirmed: string[] = [];
   const store = new ProStore(new MemoryProTable());
   const pro = new ProSubscriptionService({
-    store, provider: new FakeProPaymentProvider(), includedTiers: [SubscriptionTier.INFINITY],
+    store, provider: new FakeProPaymentProvider(),
     prices: { MONTHLY: 79_900, YEARLY: 599_900 }, currency: 'INR', logger: quiet,
     directory: {
       get: async () => ({ tier: SubscriptionTier.INFINITY }),

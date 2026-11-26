@@ -29,7 +29,7 @@ import { unavailableMembershipDirectory } from './membershipDirectory';
 import { StateMembershipClient } from './stateMembershipClient';
 import { ProHandoverWorker, ProRenewalScheduler } from './proHandoverWorker';
 import { AttachmentStore } from './attachmentStore';
-import { AttachmentProcessingQueue, AttachmentProcessor, FfmpegFrameExtractor } from './attachmentProcessor';
+import { AttachmentProcessingQueue, AttachmentProcessor, FfmpegFrameExtractor, resolveFfmpegPath } from './attachmentProcessor';
 import { AttachmentUsageLedger } from './attachmentUsage';
 import { AzureDocumentReader, AzureTranscriber, AzureVisionReader } from './attachmentAi';
 
@@ -121,7 +121,6 @@ const proService = proStore
       store: proStore,
       ...(paymentProvider ? { provider: paymentProvider } : {}),
       directory: membershipDirectory,
-      includedTiers: contextualConfig.pro.includedTiers,
       prices: contextualConfig.pro.prices,
       currency: contextualConfig.pro.currency,
     })
@@ -181,11 +180,13 @@ if (contextualConfig.ready && blobServiceClient) {
       ? new AzureDocumentReader(attachmentConfig.documentIntelligenceEndpoint, credential)
       : undefined;
     if (!documents) console.warn('[WARN] PDF and Office attachments are off (needs AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT)');
+    const ffmpegPath = resolveFfmpegPath(attachmentConfig.ffmpegPath);
+    if (!ffmpegPath) console.warn('[WARN] Video frames are off (no ffmpeg); only the sound of videos is read');
     const processor = new AttachmentProcessor({
       vision: new AzureVisionReader(visionClient, attachmentConfig.visionDeployment),
       ...(transcriber ? { transcriber } : {}),
       ...(documents ? { documents } : {}),
-      ...(attachmentConfig.ffmpegPath ? { frames: new FfmpegFrameExtractor(attachmentConfig.ffmpegPath) } : {}),
+      ...(ffmpegPath ? { frames: new FfmpegFrameExtractor(ffmpegPath) } : {}),
     }, attachmentConfig.rates, attachmentConfig.maxDocumentPages);
     const usage = new AttachmentUsageLedger(proStore, attachmentConfig);
     attachments = { store: attachmentStore, processor, usage, queue: new AttachmentProcessingQueue(attachmentStore, processor, usage) };

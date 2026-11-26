@@ -4,6 +4,8 @@ import { RowChangedError, RowExistsError, ProStoreUnavailableError, type ProTabl
 export class MemoryProTable implements ProTable {
   readonly rows = new Map<string, { data: string; nextActionAt?: string; etag: string }>();
   private counter = 0;
+  /** How many times the whole table was read (the due-index backfill). */
+  fullScans = 0;
   /** Set to make every call fail like an unreachable table. */
   down = false;
 
@@ -53,13 +55,25 @@ export class MemoryProTable implements ProTable {
     return out;
   }
 
-  async due(rowKeys: string[], nowIso: string, limit: number) {
+  async listRange(from: string, to: string, limit: number) {
     this.check();
-    const out: Array<{ partitionKey: string; rowKey: string }> = [];
+    const out: Array<ProTableRow & { partitionKey: string; rowKey: string }> = [];
+    // Sorted like Azure Tables (PartitionKey, then RowKey).
+    for (const [key, row] of [...this.rows].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+      const [p, r] = key.split('\u0000') as [string, string];
+      if (p >= from && p <= to) out.push({ ...row, partitionKey: p, rowKey: r });
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  async scanScheduled(rowKeys: string[]) {
+    this.check();
+    this.fullScans += 1;
+    const out: Array<{ partitionKey: string; rowKey: string; nextActionAt: string }> = [];
     for (const [key, row] of this.rows) {
       const [p, r] = key.split('\u0000') as [string, string];
-      if (rowKeys.includes(r) && row.nextActionAt && row.nextActionAt <= nowIso) out.push({ partitionKey: p, rowKey: r });
-      if (out.length >= limit) break;
+      if (rowKeys.includes(r) && row.nextActionAt) out.push({ partitionKey: p, rowKey: r, nextActionAt: row.nextActionAt });
     }
     return out;
   }

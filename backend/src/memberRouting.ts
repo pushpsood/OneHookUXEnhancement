@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import type { SubscriptionTier } from 'onehook-api-client';
+import { includesMrOneHookPro } from 'onehook-api-client/membership';
 import type { ContextualFeatureConfig } from './contextConfig';
 import type { ProEntitlement, ProSubscriptionService } from './proSubscriptionService';
 import { isUuid } from './contextTypes';
@@ -67,7 +68,7 @@ export async function resolveEntitlement(
   tier: SubscriptionTier,
 ): Promise<ProEntitlement> {
   if (pro) return pro.entitlement(subject, tier);
-  return config.pro.includedTiers.includes(tier)
+  return includesMrOneHookPro(tier)
     ? { plan: 'PRO', source: 'MEMBERSHIP' }
     : { plan: 'FREE', source: 'NONE' };
 }

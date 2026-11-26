@@ -306,7 +306,7 @@ test('(c) every route answers bodies that match its declared responses in mr-one
       free: { enabled: true, maxSessions: 1, maxMessages: 50, retentionDays: 30 },
       pro: { enabled: true, maxSessions: 3, maxMessages: 50, retentionDays: 30 },
     }),
-    MR_ONEHOOK_PRO_ENABLED: 'true', MR_ONEHOOK_PRO_INCLUDED_TIERS: 'infinity', AZURE_PRO_TABLE: 'pro',
+    MR_ONEHOOK_PRO_ENABLED: 'true', AZURE_PRO_TABLE: 'pro',
     MR_ONEHOOK_PRO_PAYMENT_PROVIDER: 'fake', ONEHOOK_STAGE: 'test',
     CHAT_ATTACHMENTS_ENABLED: 'true', ATTACHMENT_BURST_FILES: '3',
     ...extra,
@@ -323,7 +323,7 @@ test('(c) every route answers bodies that match its declared responses in mr-one
   const proStore = new ProStore(proTable);
   const pro = new ProSubscriptionService({
     store: proStore, provider: new FakeProPaymentProvider(), directory: membership.directory,
-    includedTiers: fullConfig.pro.includedTiers, prices: fullConfig.pro.prices, currency: 'INR', logger: quiet,
+    prices: fullConfig.pro.prices, currency: 'INR', logger: quiet,
   });
   const container = new MemoryContainer();
   const attachmentStore = new AttachmentStore(container.asContainer());

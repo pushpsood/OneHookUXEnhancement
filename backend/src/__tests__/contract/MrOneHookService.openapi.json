@@ -2500,7 +2500,7 @@
                 "properties": {
                     "message": {
                         "type": "string",
-                        "description": "1 to `CONTEXT_MAX_INPUT_CHARACTERS` (default 4000) characters; trimmed, must not be blank."
+                        "description": "Up to `CONTEXT_MAX_INPUT_CHARACTERS` (default 4000) characters; trimmed. Must not be blank unless\n`attachmentIds` is present: files sent without text become the turn \"Please look at the attached\nfiles.\" (saved and shown as the user's message)."
                     },
                     "matchId": {
                         "type": "string",

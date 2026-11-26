@@ -87,7 +87,6 @@ async function withServer(quotaTable: QuotaTable, run: (call: (tier: string | un
     CONTEXTUAL_AI_ENABLED: 'true', AUTH_ISSUER: 'https://issuer.test', AUTH_AUDIENCE: 'aud', AUTH_JWKS_URI: jwksUrl,
     CORS_ALLOWED_ORIGINS: 'https://x', ONEHOOK_DATA_API_URL: 'https://data', AZURE_STORAGE_ACCOUNT: 'acct',
     AZURE_SESSION_CONTAINER: 'c', ONEHOOK_DATA_API_AWS_REGION: 'ap-south-1', AZURE_CHAT_QUOTA_TABLE: 'chatquota',
-    MR_ONEHOOK_PRO_INCLUDED_TIERS: 'infinity',
   } as NodeJS.ProcessEnv);
   let calls = 0;
   const client = { chat: { completions: { create: async () => { calls++; return { choices: [{ message: { content: JSON.stringify({ reply: 'hi', mood: 'Happy' }) } }] }; } } } };

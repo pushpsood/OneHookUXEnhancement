@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { SubscriptionTier } from 'onehook-api-client';
+import { includesMrOneHookPro } from 'onehook-api-client/membership';
 import type {
   ProBillingPeriod,
   ProEndedReason,
@@ -258,7 +259,6 @@ export interface ProServiceOptions {
   /** Absent: purchases answer 503 PAYMENTS_NOT_CONFIGURED; membership Pro still works. */
   provider?: ProPaymentProvider;
   directory: MembershipDirectory;
-  includedTiers: readonly SubscriptionTier[];
   prices: Readonly<Record<ProBillingPeriod, number>>;
   currency: string;
   now?: () => Date;
@@ -278,7 +278,6 @@ export class ProSubscriptionService {
   private readonly store: ProStore;
   private readonly provider: ProPaymentProvider | undefined;
   private readonly directory: MembershipDirectory;
-  private readonly includedTiers: ReadonlySet<SubscriptionTier>;
   private readonly prices: Readonly<Record<ProBillingPeriod, number>>;
   private readonly currency: string;
   private readonly now: () => Date;
@@ -288,7 +287,6 @@ export class ProSubscriptionService {
     this.store = options.store;
     this.provider = options.provider;
     this.directory = options.directory;
-    this.includedTiers = new Set(options.includedTiers);
     this.prices = options.prices;
     this.currency = options.currency;
     this.now = options.now ?? (() => new Date());
@@ -299,9 +297,9 @@ export class ProSubscriptionService {
     return this.provider !== undefined;
   }
 
-  /** True when this membership tier includes Pro (the token's tier, or State's). */
+  /** True when this membership tier includes Pro (the token's tier, or State's), per the shared tier catalog. */
   includesPro(tier: SubscriptionTier | undefined): boolean {
-    return tier !== undefined && this.includedTiers.has(tier);
+    return tier !== undefined && includesMrOneHookPro(tier);
   }
 
   offers(): Array<{ billingPeriod: ProBillingPeriod; priceMinor: number; currency: string }> {

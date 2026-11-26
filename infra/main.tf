@@ -272,7 +272,7 @@ resource "azurerm_service_plan" "asp" {
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
   os_type             = "Linux"
-  sku_name            = "B1"
+  sku_name            = var.app_service_sku_name
 }
 
 # App Service (Node.js API)
@@ -336,7 +336,6 @@ resource "azurerm_linux_web_app" "app" {
       }
     })
     "MR_ONEHOOK_PRO_ENABLED"           = tostring(var.mr_onehook_pro_enabled)
-    "MR_ONEHOOK_PRO_INCLUDED_TIERS"    = join(",", var.mr_onehook_pro_included_tiers)
     "MR_ONEHOOK_PRO_PRICES"            = jsonencode(var.mr_onehook_pro_prices)
     "MR_ONEHOOK_PRO_PAYMENT_PROVIDER"  = var.mr_onehook_pro_payment_provider
     "MR_ONEHOOK_ENTITLEMENT_QUEUE_URL" = var.mr_onehook_entitlement_queue_url

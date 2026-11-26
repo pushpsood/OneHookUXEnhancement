@@ -11,7 +11,7 @@ and what the apps must do. The code is in `backend/src/pro*.ts`, `backend/src/at
 | Plan | Who | Messages | Saved sessions | New session at the cap | Attachments |
 |---|---|---|---|---|---|
 | Free | Must and Super members | 10 per UTC day | 1 | Replaces the existing one | Can be selected in the apps; sending needs Pro (`403 PRO_REQUIRED`) |
-| Pro | A Pro subscription, or a membership tier in `MR_ONEHOOK_PRO_INCLUDED_TIERS` (Infinity) | Unlimited (20 requests/minute) | 3 | Deletes the least recently active one | Up to 3 per message, 5 MiB each, within a monthly processing allowance |
+| Pro | A Pro subscription, or a membership tier that includes Pro (Infinity; `includesMrOneHookPro` in the `onehook-api-client` tier catalog, no setting) | Unlimited (20 requests/minute) | 3 | Deletes the least recently active one | Up to 3 per message, 5 MiB each, within a monthly processing allowance |
 
 How a request gets its plan (`ProSubscriptionService.entitlement`):
 
@@ -46,6 +46,13 @@ Every charge and refund first writes a ledger row (`ledger:charge:<subscription>
 insert-if-absent). The provider idempotency key is derived from that row, so two instances, a crash or a
 retry can never charge one period twice. Due rows are leased with an ETag, so only one instance works on a
 row at a time.
+
+The job finds due rows through a small index in the same table (`due:<YYYYMMDDHH>` partitions, one entry
+per subscription or continuation with a `nextActionAt`), so it reads only the index's past hours, never every
+member's partition. An entry is a hint: the job reads the real row and acts only if its own `nextActionAt`
+is due, and still asks State before any charge. Entries are written before their row (a crash leaves an
+extra entry, never a missed renewal) and removed when the row moves on, is deleted or the member is erased.
+Rows written before the index existed are added once, on the first run (`meta`/`due-index` marks it done).
 
 ### Rules for a membership that includes Pro
 
@@ -126,7 +133,7 @@ allowance.
 | Document: pdf, docx, xlsx, pptx | `%PDF`, or a ZIP central directory (word/, xl/, ppt/) | Document Intelligence `prebuilt-read`, up to 50 pages |
 | Text: txt, md, csv, tsv, vtt, srt, json | valid UTF-8 without NUL | decoded |
 | Audio: mp3, m4a, wav, ogg, flac, webm | magic bytes | transcription deployment |
-| Video: mp4, mov, webm | magic bytes / brand | the sound is transcribed; with `FFMPEG_PATH`, 6 keyframes are also described |
+| Video: mp4, mov, webm | magic bytes / brand | the sound is transcribed, and 6 keyframes are described (bundled ffmpeg, see below) |
 
 Refused: anything else, including executables under any name, ZIPs that are not Office files, archives
 whose directory claims more than 200 MB or 5,000 entries, and raw AAC.
@@ -135,6 +142,16 @@ Extracted text goes into the prompt as untrusted data, at most 12,000 characters
 turn. A saved session keeps a reference and a 1,500-character excerpt of each upload, so later turns still
 know what the file said. The bytes move to `attachments/saved/` and are deleted with the session, or when
 its turn slides out of the window. Unsent uploads expire after a day.
+
+**Video keyframes.** The app ships ffmpeg (`ffmpeg-static`, GPL-3.0-or-later, an unmodified program run as a
+separate process; `FFMPEG_PATH` overrides it). Each video runs in its own process with an empty environment,
+in a temp folder that is always removed, with the input format forced from the detected type (mp4 and mov
+as `mov`, webm as `matroska`), only local files allowed (`-protocol_whitelist file`, so no network and no
+playlists), at most 6 frames of 512 px, one thread, and a 30-second limit (then it is killed). If ffmpeg
+fails or is missing, the video is still read from its sound.
+
+**Files without text.** A turn may have an empty `message` when it has `attachmentIds`. It is then saved
+and shown as "Please look at the attached files." A turn with neither is still a 400.
 
 **Files from a match chat.** The app decrypts a selected file on the device and uploads it with
 `X-Attachment-Match-Id` and `X-Attachment-Sender` (`self` or `match`). The match is authorized. A file the

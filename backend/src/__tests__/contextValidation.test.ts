@@ -4,7 +4,7 @@ import { extractPermissions, resolveMembershipTier } from '../auth';
 import { SubscriptionTier } from 'onehook-api-client';
 import { SUBSCRIPTION_TIERS, parseSubscriptionTier } from 'onehook-api-client/membership';
 import { loadContextualFeatureConfig, normalizeTier } from '../contextConfig';
-import { parseContextualChatInput } from '../contextTypes';
+import { ATTACHMENTS_ONLY_MESSAGE, parseContextualChatInput } from '../contextTypes';
 
 test('contextual feature is disabled and not ready by default', () => {
   const config = loadContextualFeatureConfig({});
@@ -172,9 +172,8 @@ test('an unknown single tier claim is treated as Must and logged as an error', (
   assert.match(String(logged[0]), /UnknownSubscriptionTier: token tier 'NOT_A_TIER' treated as Must/);
 });
 
-test('Pro config: included tiers come from config, prices default to Rs 799 / Rs 5,999, the fake provider is refused in prod', () => {
+test('Pro config: prices default to Rs 799 / Rs 5,999, the fake provider is refused in prod', () => {
   const pro = (extra: Record<string, string>) => loadContextualFeatureConfig({ MR_ONEHOOK_PRO_ENABLED: 'true', ...extra } as NodeJS.ProcessEnv).pro;
-  assert.deepEqual(pro({ MR_ONEHOOK_PRO_INCLUDED_TIERS: 'infinity, not-a-tier' }).includedTiers, [SubscriptionTier.INFINITY]);
   assert.deepEqual(pro({}).prices, { MONTHLY: 79_900, YEARLY: 599_900 });
   assert.deepEqual(pro({ MR_ONEHOOK_PRO_PRICES: '{"monthly":69900,"yearly":-1}' }).prices, { MONTHLY: 69_900, YEARLY: 599_900 });
   assert.equal(pro({ MR_ONEHOOK_PRO_PAYMENT_PROVIDER: 'fake', ONEHOOK_STAGE: 'gamma' }).paymentProvider, 'fake');
@@ -292,4 +291,15 @@ test('ephemeral message context is bounded and requires an authorized match scop
     message: 'Too large',
     ephemeralMessageContext: { excerpts: [{ speaker: 'self', sentAt, text: 'x'.repeat(20) }] },
   }, 100, 3, 10));
+});
+
+test('files may be sent without text; text-only turns still need text', () => {
+  const id = '3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e';
+  assert.equal(parseContextualChatInput({ message: '', attachmentIds: [id] }, 100).message, ATTACHMENTS_ONLY_MESSAGE);
+  assert.equal(parseContextualChatInput({ message: '   ', attachmentIds: [id] }, 100).message, ATTACHMENTS_ONLY_MESSAGE);
+  assert.equal(parseContextualChatInput({ message: ' what is this? ', attachmentIds: [id] }, 100).message, 'what is this?');
+  assert.throws(() => parseContextualChatInput({ message: '' }, 100), /Invalid message/);
+  assert.throws(() => parseContextualChatInput({ message: '  ' }, 100), /Invalid message/);
+  assert.throws(() => parseContextualChatInput({ attachmentIds: [id] }, 100), 'message stays required');
+  assert.throws(() => parseContextualChatInput({ message: '', attachmentIds: [] }, 100), /Invalid attachmentIds/);
 });

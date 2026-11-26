@@ -45,7 +45,7 @@ function setup(start = START) {
     },
   };
   const service = new ProSubscriptionService({
-    store, provider, directory, includedTiers: [INFINITY], prices: { MONTHLY: 79_900, YEARLY: 599_900 }, currency: 'INR',
+    store, provider, directory, prices: { MONTHLY: 79_900, YEARLY: 599_900 }, currency: 'INR',
     now: clock.now, logger: { info: () => {}, warn: () => {}, error: () => {} },
   });
   const sub = async (userId = 'm1') => (await store.read(userId, SUBSCRIPTION_ROW, parseSubscription))?.value;
@@ -416,4 +416,38 @@ test('the Pro table being down is an error, never "Free" (which would drop a pay
   t.table.down = true;
   await assert.rejects(t.service.entitlement('m1', SUPER));
   assert.deepEqual(await t.service.entitlement('m1', INFINITY), { plan: 'PRO', source: 'MEMBERSHIP' }, 'membership needs no lookup');
+});
+
+test('due index: the job reads only past index hours, cleans stale entries, and backfills older rows once', async () => {
+  const t = setup();
+  await t.service.purchase('m1', SUPER, { billingPeriod: 'MONTHLY', paymentToken: FAKE_TOKENS.OK }, randomUUID());
+  await t.service.purchase('m2', SUPER, { billingPeriod: 'YEARLY', paymentToken: FAKE_TOKENS.OK }, randomUUID());
+  const entries = () => [...t.table.rows.keys()].filter((k) => k.startsWith('due:')).map((k) => k.split('\u0000')[0]).sort();
+
+  // Before the anniversary nothing is due; the index has one entry per renewal (plus purchase leftovers).
+  t.clock.set('2026-02-10T08:59:00.000Z');
+  assert.equal(await t.service.runDue(), 0);
+  assert.ok(entries().includes('due:2026021009') && entries().includes('due:2027011009'), entries().join());
+  assert.equal(t.table.fullScans, 1, 'the backfill reads the whole table once');
+
+  t.clock.set('2026-02-10T09:00:01.000Z');
+  assert.equal(await t.service.runDue(), 1);
+  assert.deepEqual(t.charged(), ['PURCHASE:79900', 'PURCHASE:599900', 'RENEWAL:79900']);
+  await t.service.runDue();
+  assert.ok(!entries().includes('due:2026021009'), 'the renewed hour is cleaned');
+  assert.ok(entries().includes('due:2026031009'), 'the next renewal is indexed');
+  assert.equal(t.table.fullScans, 1);
+
+  // Erasure leaves no index entry behind.
+  await t.service.eraseUser('m2');
+  assert.ok(!entries().includes('due:2027011009'));
+
+  // A row written before the index existed (no entry, no meta row) is found by the one-time backfill.
+  const old = setup();
+  await old.service.purchase('m3', SUPER, { billingPeriod: 'MONTHLY', paymentToken: FAKE_TOKENS.OK }, randomUUID());
+  for (const k of [...old.table.rows.keys()]) if (k.startsWith('due:') || k.startsWith('meta\u0000')) old.table.rows.delete(k);
+  old.clock.set('2026-02-10T09:00:01.000Z');
+  await new ProStore(old.table).due([SUBSCRIPTION_ROW], old.clock.now(), 10).then((rows) => assert.equal(rows.length, 1));
+  assert.equal(await old.service.runDue(), 1);
+  assert.deepEqual(old.charged(), ['PURCHASE:79900', 'RENEWAL:79900']);
 });

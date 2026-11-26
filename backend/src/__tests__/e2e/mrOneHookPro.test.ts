@@ -60,7 +60,7 @@ test('Mr OneHook Pro: Free -> Pro -> membership -> keep Pro, on real storage', {
       free: { enabled: true, maxSessions: 1, maxMessages: 50, retentionDays: 30 },
       pro: { enabled: true, maxSessions: 3, maxMessages: 50, retentionDays: 30 },
     }),
-    MR_ONEHOOK_PRO_ENABLED: 'true', MR_ONEHOOK_PRO_INCLUDED_TIERS: 'infinity', AZURE_PRO_TABLE: proTableName,
+    MR_ONEHOOK_PRO_ENABLED: 'true', AZURE_PRO_TABLE: proTableName,
     MR_ONEHOOK_PRO_PAYMENT_PROVIDER: 'fake', ONEHOOK_STAGE: 'e2e', CHAT_ATTACHMENTS_ENABLED: 'true',
     // Membership-included Pro gets a tiny allowance here so the overuse refusal can be seen.
     ATTACHMENT_MONTHLY_BUDGET_MINOR: JSON.stringify({ subscription: 40_000, membership: 2 }),
@@ -95,7 +95,7 @@ test('Mr OneHook Pro: Free -> Pro -> membership -> keep Pro, on real storage', {
   // ── The real stores and services, as index.ts wires them ──
   const proStore = new ProStore(new AzureProTable(proTableClient));
   const pro = new ProSubscriptionService({
-    store: proStore, provider, directory, includedTiers: config.pro.includedTiers, prices: config.pro.prices,
+    store: proStore, provider, directory, prices: config.pro.prices,
     currency: config.pro.currency, now: clock.now, logger: quiet,
   });
   const attachmentStore = new AttachmentStore(container);
@@ -243,7 +243,7 @@ test('Mr OneHook Pro: Free -> Pro -> membership -> keep Pro, on real storage', {
     assert.ok(memberView.body.notices.some((n: { kind: string }) => n.kind === 'PRO_PAUSED_FOR_MEMBERSHIP'));
     assert.equal((await api(ravi, 'POST', '/api/member/mr-onehook-pro/subscription', { billingPeriod: 'YEARLY' }, { 'idempotency-key': randomUUID() })).body.error,
       'PRO_INCLUDED_IN_MEMBERSHIP');
-    clock.advance(32 * DAY); // past the paid month; the job runs (Table query across partitions)
+    clock.advance(32 * DAY); // past the paid month; the job runs (through the due index)
     await pro.runDue();
     const ended = await proView(ravi);
     assert.deepEqual([ended.body.subscription.status, ended.body.subscription.endedReason], ['ENDED', 'INCLUDED_IN_MEMBERSHIP']);
@@ -291,6 +291,19 @@ test('Mr OneHook Pro: Free -> Pro -> membership -> keep Pro, on real storage', {
     const left: string[] = [];
     for await (const e of proTableClient.listEntities<{ rowKey: string }>({ queryOptions: { filter: `PartitionKey eq '${proPartitionKey(raviPro)}'` } })) left.push(e.rowKey);
     assert.ok(left.length > 0 && left.every((k) => k.startsWith('ledger:')), `only ledger rows remain: ${left.join(', ')}`);
+    const indexLeft: string[] = [];
+    for await (const e of proTableClient.listEntities<{ rowKey: string }>({ queryOptions: { filter: "PartitionKey ge 'due:' and PartitionKey lt 'due;'" } })) {
+      if (e.rowKey.startsWith(proPartitionKey(raviPro))) indexLeft.push(e.rowKey);
+    }
+    assert.deepEqual(indexLeft, [], 'no due-index entry is left for an erased member');
+
+    // ── 9. The one-time due-index backfill finds scheduled rows only (real Table filter semantics) ──
+    const raw = new AzureProTable(proTableClient);
+    await raw.insert('backfill-a', 'subscription', '{}', '2026-01-01T00:00:00.000Z');
+    await raw.insert('backfill-b', 'subscription', '{}');
+    await raw.insert('backfill-c', 'handover', '{}', '2026-01-01T00:00:00.000Z');
+    const scheduled = (await raw.scanScheduled(['subscription', 'continuation'])).filter((r) => r.partitionKey.startsWith('backfill-'));
+    assert.deepEqual(scheduled, [{ partitionKey: 'backfill-a', rowKey: 'subscription', nextActionAt: '2026-01-01T00:00:00.000Z' }]);
   } finally {
     server.close();
     jwks.close();

@@ -228,7 +228,7 @@ All of it is in `infra/main.tf`, one copy per stage (region `southindia` by defa
 | Resource | Purpose |
 |---|---|
 | Resource group | `onehook-chatbot-rg` (gamma) or `onehook-chatbot-prod-rg` (prod) |
-| App Service plan, Linux `B1` | Hosts the backend |
+| App Service plan, Linux (`app_service_sku_name`, default `B1`) | Hosts the backend; also runs ffmpeg for video keyframes |
 | Linux web app, Node `20-lts`, system-assigned identity | Runs `npm start`; HTTPS only, TLS 1.2 minimum, health check `/health` (eviction after 5 minutes); app settings listed under [Environment variables](#environment-variables) |
 | Azure OpenAI account (`S0`, local key auth disabled) | Only Entra ID tokens can call it |
 | Model deployment `gpt-4o` (`gpt-4o`, version `2024-11-20`, `Standard`, capacity 10) | Chat completions for both routes |
@@ -258,7 +258,7 @@ Terraform outputs: `app_service_default_hostname`, `app_service_name`, `storage_
   10 requests per minute per `X-Forwarded-For` value; member routes allow 20 requests per minute per member
   (in memory, per instance); Free plan members get 10 messages per UTC day; Pro file processing has a monthly
   allowance (default Rs 400 of Azure cost) and a burst limit; JSON bodies are capped at 32 KB, uploads at 5 MiB;
-  `CRUX.md` is cached for 10 minutes; the App Service plan is `B1`. There is no Application Insights or
+  `CRUX.md` is cached for 10 minutes; the App Service plan is `B1` (`app_service_sku_name`; raise it only if CPU or memory alarms show video processing needs it). There is no Application Insights or
   budget alert in Terraform.
 
 ---
@@ -272,7 +272,7 @@ route answers `403` for chat access (`403` is only used for session-plan, excerp
   (`FREE_DAILY_MESSAGES` in `backend/src/chatQuota.ts`). Beyond that the route returns
   `402 {"error": "MESSAGE_LIMIT_REACHED", "remainingMessages": 0}` and the model is not called. Successful
   responses for Free members carry `remainingMessages` so the apps can show "3 left today".
-- **Mr OneHook Pro** (a Pro subscription, or a tier in `MR_ONEHOOK_PRO_INCLUDED_TIERS`, Infinity by default):
+- **Mr OneHook Pro** (a Pro subscription, or a membership tier that includes Pro: Infinity, from the `onehook-api-client` tier catalog):
   unlimited, still subject to the 20 requests/minute per-member limit. See [Mr OneHook Pro](docs/mr-onehook-pro.md).
 - The tier is the verified token's `AUTH_TIER_CLAIM` (default `custom:subscriptionTier`), never the
   client's; an upgrade applies at the next token refresh. Tier names are parsed by `onehook-api-client`,
@@ -514,7 +514,6 @@ when the variable is absent.
 | `CHAT_SESSION_PLAN_POLICIES` | JSON map of plan (`free`, `pro`) to `{enabled, maxSessions, maxMessages, retentionDays}`. The old `CHAT_SESSION_TIER_POLICIES` is ignored (with a warning) | `{}` | from `chat_session_plan_policies` (free 1 session, pro 3) |
 | `ONEHOOK_STAGE` | Stage name; the fake payment provider is refused unless it is set and not `prod` | empty | `stage` |
 | `MR_ONEHOOK_PRO_ENABLED` | Turns on the Pro routes (`/api/member/mr-onehook-pro`) | `false` | `mr_onehook_pro_enabled` (gamma `true`) |
-| `MR_ONEHOOK_PRO_INCLUDED_TIERS` | Comma-separated tiers that include Pro (no lookup, none sold) | empty | `infinity` |
 | `AZURE_PRO_TABLE` | Table for Pro subscriptions, ledger, notices and the attachment allowance | none | `mronehookpro` |
 | `MR_ONEHOOK_PRO_PRICES` | `{"monthly": paise, "yearly": paise}` | Rs 799 / Rs 5,999 | `mr_onehook_pro_prices` |
 | `MR_ONEHOOK_PRO_PAYMENT_PROVIDER` | `none` or `fake` (moves no money; refused in prod) | `none` | gamma `fake`, prod `none` |
@@ -528,7 +527,7 @@ when the variable is absent.
 | `AZURE_OPENAI_TRANSCRIPTION_DEPLOYMENT`, `AZURE_OPENAI_TRANSCRIPTION_ENDPOINT`, `AZURE_OPENAI_TRANSCRIPTION_API_VERSION` | Audio and video; empty deployment turns them off | empty, the OpenAI endpoint, `2025-04-01-preview` | from `openai_transcription_deployment` (null by default) |
 | `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` | PDF, Office and HEIC; empty turns them off | empty | the Document Intelligence account when `document_intelligence_enabled` |
 | `ATTACHMENT_MAX_DOCUMENT_PAGES` | Pages read per document (1-500) | `50` | not set |
-| `FFMPEG_PATH` | Optional ffmpeg for video keyframes; without it a video is read from its sound | empty | not set |
+| `FFMPEG_PATH` | ffmpeg for video keyframes; empty uses the bundled `ffmpeg-static`. Without any ffmpeg a video is read from its sound | bundled | not set |
 | `CHAT_SESSION_MAX_RETENTION_DAYS` | Retention hard cap (1-365) | `90` | `90` |
 | `UX_ERASURE_QUEUE_URL` | SQS queue `OneHook-Matching-<stage>-UxErasure`; empty turns the erasure worker off | empty | gamma queue URL; prod empty |
 | `UX_ERASURE_CONCURRENCY` | Erasure messages processed at once (1-10) | `4` | not set |
@@ -1052,6 +1051,13 @@ az ad app federated-credential create --id $APP_ID --parameters "{
 Terraform uses the AzureRM backend in `infra/main.tf`: resource group `onehook-tfstate-rg`, storage account `onehooktfstate4x`, container `tfstate`, `use_oidc = true`. The key comes from `infra/stages/<stage>.backend.hcl` (`terraform.tfstate` for gamma, `prod.terraform.tfstate` for prod). Those state resources must already exist before `terraform init`; this configuration does not create them.
 
 ---
+
+## Third-party software
+
+- **ffmpeg** (video keyframes) comes from the `ffmpeg-static` package: an unmodified ffmpeg 6.0 build under
+  GPL-3.0-or-later (see `node_modules/ffmpeg-static/ffmpeg.LICENSE` and `ffmpeg.README`, which link the source).
+  The backend only runs it as a separate program on the server; it is not linked into our code and not
+  shipped to members' devices. Changing or redistributing the binary would bring the GPL's source-code duties.
 
 ## Project Structure
 

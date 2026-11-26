@@ -58,7 +58,6 @@ async function withServer(run: (ctx: { send: Send; modelCalls: () => number; quo
       free: { enabled: true, maxSessions: 1, maxMessages: 50, retentionDays: 30 },
       pro: { enabled: true, maxSessions: 3, maxMessages: 50, retentionDays: 30 },
     }),
-    MR_ONEHOOK_PRO_INCLUDED_TIERS: 'infinity',
   } as NodeJS.ProcessEnv);
   let calls = 0;
   let quota = 0;
@@ -79,7 +78,7 @@ async function withServer(run: (ctx: { send: Send; modelCalls: () => number; quo
   const { store, sessions } = memoryStore();
   const pro = new ProSubscriptionService({
     store: new ProStore(new MemoryProTable()), provider: new FakeProPaymentProvider(), directory: unavailableMembershipDirectory,
-    includedTiers: config.pro.includedTiers, prices: config.pro.prices, currency: 'INR',
+    prices: config.pro.prices, currency: 'INR',
     logger: { info: () => {}, warn: () => {}, error: () => {} },
   });
   const app = express();

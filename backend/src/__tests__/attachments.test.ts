@@ -276,7 +276,7 @@ test('a file the match sent is used for one turn of that connection chat, then d
     CORS_ALLOWED_ORIGINS: 'https://x', ONEHOOK_DATA_API_URL: 'https://data', AZURE_STORAGE_ACCOUNT: 'acct',
     AZURE_SESSION_CONTAINER: 'c', ONEHOOK_DATA_API_AWS_REGION: 'ap-south-1', CHAT_SESSION_STORAGE_ENABLED: 'true',
     CHAT_SESSION_PLAN_POLICIES: JSON.stringify({ pro: { enabled: true, maxSessions: 3, maxMessages: 50, retentionDays: 30 }, free: { enabled: true, maxSessions: 1, maxMessages: 50, retentionDays: 30 } }),
-    MR_ONEHOOK_PRO_INCLUDED_TIERS: 'infinity', AZURE_PRO_TABLE: 'pro', CHAT_ATTACHMENTS_ENABLED: 'true',
+    AZURE_PRO_TABLE: 'pro', CHAT_ATTACHMENTS_ENABLED: 'true',
   } as NodeJS.ProcessEnv);
   const container = new MemoryContainer();
   const attachmentStore = new AttachmentStore(container.asContainer());
